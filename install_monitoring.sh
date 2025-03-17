@@ -5,7 +5,7 @@
 # ELK (Elasticsearch, Logstash, Kibana), Suricata (optionnel),
 # avec installation automatique des dépendances (iptables, ufw, python3, pip, etc.)
 #
-# Auteur  : ChatGPT
+# Auteur  : VAPOTANK
 # Date    : 2025-03-17
 # Usage   : sudo ./install_monitoring.sh
 ################################################################################
