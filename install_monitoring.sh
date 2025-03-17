@@ -28,7 +28,8 @@ update_system() {
 install_zabbix() {
     if ask_user "Voulez-vous installer Zabbix ?"; then
         echo "--- Installation de Zabbix ---"
-        wget -qO- https://repo.zabbix.com/zabbix/6.0/debian/zabbix-release_latest.deb | dpkg -i - || die "Échec du téléchargement du dépôt Zabbix"
+        wget -O /tmp/zabbix-release.deb https://repo.zabbix.com/zabbix/6.0/debian/pool/main/z/zabbix-release/zabbix-release_6.0-4+debian11_all.deb || die "Échec du téléchargement du dépôt Zabbix"
+        dpkg -i /tmp/zabbix-release.deb || die "Échec de l'installation du dépôt Zabbix"
         apt update
         apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent || die "Échec de l'installation de Zabbix"
     else
