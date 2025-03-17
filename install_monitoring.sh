@@ -1,7 +1,7 @@
 #!/bin/bash
 set -o errexit
 set -o pipefail
-set -o errtrace  # Propager les erreurs dans les fonctions et les traps
+set -o errtrace  # Propager les erreurs dans les fonctions et traps
 
 ################################################################################
 # Script d'installation complet : Zabbix, Grafana, Fail2ban, Lynis, Vulners,
@@ -26,31 +26,31 @@ set -o errtrace  # Propager les erreurs dans les fonctions et les traps
 
 LOG_FILE="/var/log/auto_monitoring.log"
 
-# Fonction de log d'information
+# Fonctions de log
 log_info() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" | tee -a "$LOG_FILE"
 }
 
-# Fonction de log d'erreur
 log_error() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [ERROR] $1" | tee -a "$LOG_FILE" >&2
 }
 
-# Fonction de gestion des erreurs
+# Fonction de gestion des erreurs et sortie
 error_exit() {
     local exit_code=$1
     shift
     log_error "$*"
-    log_error "Conseil : Vérifiez la commande qui a échoué et consultez $LOG_FILE pour plus de détails."
+    log_error "Conseil : Consultez $LOG_FILE pour plus de détails."
     rollback
     exit "$exit_code"
 }
 
-# Vérifie le code de sortie de la dernière commande et quitte en cas d'erreur
+# Vérifie le code de sortie de la dernière commande
 check_exit() {
+    local cmd="$1"
     local code=$?
     if [ $code -ne 0 ]; then
-        error_exit "$code" "La commande '$1' a échoué avec le code $code."
+        error_exit "$code" "La commande '$cmd' a échoué avec le code $code."
     fi
 }
 
@@ -58,17 +58,28 @@ check_exit() {
 # ROLLBACK / ERREUR    #
 ########################
 
-# Sauvegarde initiale du fichier sources APT
-[ -f /etc/apt/sources.list ] && cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
-
 rollback() {
-    log_info "[ROLLBACK] Début du rollback..."
-    [ -f /etc/apt/sources.list.bak ] && mv /etc/apt/sources.list.bak /etc/apt/sources.list 2>/dev/null
-    rm -f "$GRAFANA_KEY" "$ELASTIC_KEY" 2>/dev/null
-    rm -f /etc/apt/sources.list.d/grafana.list 2>/dev/null
-    rm -f /etc/apt/sources.list.d/elastic-7.x.list 2>/dev/null
-    log_info "[ROLLBACK] Rollback terminé. Le système a été restauré à son état initial."
+    log_info "[ROLLBACK] Début du rollback granulaire..."
+    # Restaurer le fichier sources APT si sauvegardé
+    if [ -f /etc/apt/sources.list.bak ]; then
+        mv /etc/apt/sources.list.bak /etc/apt/sources.list
+        log_info "[ROLLBACK] Fichier /etc/apt/sources.list restauré."
+    fi
+    # Supprimer les clés et fichiers de dépôts ajoutés
+    rm -f "$GRAFANA_KEY" "$ELASTIC_KEY"
+    rm -f /etc/apt/sources.list.d/grafana.list /etc/apt/sources.list.d/elastic-7.x.list
+    log_info "[ROLLBACK] Fichiers de dépôt et clés supprimés."
+    # Arrêter et désactiver les services Zabbix et Apache s'ils sont lancés
+    systemctl stop zabbix-server zabbix-agent apache2 2>/dev/null || true
+    systemctl disable zabbix-server zabbix-agent apache2 2>/dev/null || true
+    # Tenter de désinstaller les paquets Zabbix (sans confirmation)
+    apt-get remove -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent zabbix-sql-scripts 2>/dev/null || true
+    # Supprimer le répertoire créé pour le PID de Zabbix
+    rm -rf /run/zabbix
+    log_info "[ROLLBACK] Rollback terminé. Veuillez vérifier manuellement l'état du système."
 }
+
+trap 'error_exit 1 "Une erreur inattendue est survenue."' ERR
 
 ########################
 # VARIABLES DE CONFIG  #
@@ -99,7 +110,7 @@ ELASTIC_KEY="$KEYRINGS_DIR/elastic.gpg"
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Demande validée avec vérification de l'entrée (y/n)
+# Demande et validation d'une réponse (y/n)
 ask_user() {
     local input
     read -p "$1 (y/n): " input
@@ -139,19 +150,18 @@ setup_grafana_repo() {
     cat <<EOF > /etc/apt/sources.list.d/grafana.list
 deb [signed-by=$GRAFANA_KEY] https://packages.grafana.com/oss/deb stable main
 EOF
-    check_exit "Création du fichier de dépôt Grafana"
+    check_exit "Création du dépôt Grafana"
     log_info "Dépôt Grafana configuré."
 }
 
 setup_elastic_repo() {
     log_info "Configuration du dépôt Elastic..."
     mkdir -p "$KEYRINGS_DIR" || error_exit 5 "Impossible de créer le dossier $KEYRINGS_DIR."
-    wget -qO "$ELASTIC_KEY" https://artifacts.elastic.co/GPG-KEY-elasticsearch || \
-                   error_exit 2 "Téléchargement de la clé Elastic a échoué."
+    wget -qO "$ELASTIC_KEY" https://artifacts.elastic.co/GPG-KEY-elasticsearch || error_exit 2 "Téléchargement de la clé Elastic a échoué."
     cat <<EOF > /etc/apt/sources.list.d/elastic-7.x.list
 deb [signed-by=$ELASTIC_KEY] https://artifacts.elastic.co/packages/7.x/apt stable main
 EOF
-    check_exit "Création du fichier de dépôt Elastic"
+    check_exit "Création du dépôt Elastic"
     log_info "Dépôt Elastic configuré."
 }
 
@@ -173,7 +183,7 @@ configure_firewall() {
         ufw allow 3000/tcp || error_exit 5 "L'ouverture du port Grafana a échoué."
         ufw allow 5601/tcp || error_exit 5 "L'ouverture du port Kibana a échoué."
         ufw allow 5044/tcp || error_exit 5 "L'ouverture du port Logstash a échoué."
-        # Confirmez l'activation en cas d'avertissement sur SSH
+        # En cas d'avertissement sur SSH, confirmer automatiquement
         echo "y" | ufw enable || error_exit 5 "L'activation d'UFW a échoué."
         log_info "Firewall UFW configuré et activé."
     else
@@ -214,9 +224,6 @@ EOF
     check_exit "Création de la base et de l'utilisateur Zabbix"
     log_info "Configuration de MariaDB terminée."
 }
-
-
-
 
 ########################
 # DÉPENDANCES ZABBIX   #
@@ -367,7 +374,7 @@ install_elk() {
         if [ "$ENABLE_ELASTIC_SECURITY" = true ]; then
             log_info "Activation de la sécurité xpack pour Elasticsearch..."
             sed -i '/^#\?xpack.security.enabled:/d' /etc/elasticsearch/elasticsearch.yml
-            echo "xpack.security.enabled: true" >> /etc/elasticsearch/elasticsearch.yml || error_exit 5 "Configuration xpack.security dans elasticsearch.yml a échoué."
+            echo "xpack.security.enabled: true" >> /etc/elasticsearch/elasticsearch.yml || error_exit 5 "Configuration de xpack.security dans elasticsearch.yml a échoué."
             systemctl restart elasticsearch || error_exit 5 "Redémarrage d'Elasticsearch a échoué."
             sleep 10
             log_info "Génération des mots de passe pour Elasticsearch..."
