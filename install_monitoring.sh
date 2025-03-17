@@ -25,8 +25,16 @@ update_system() {
     apt update && apt upgrade -y || die "Échec de la mise à jour du système"
 }
 
+fix_dependencies() {
+    echo "--- Ajout des paquets nécessaires pour Zabbix sur Debian 12 ---"
+    echo "deb http://security.debian.org/debian-security bullseye-security main" | tee -a /etc/apt/sources.list
+    apt update
+    apt install -y libssl1.1 libldap-2.4-2 || die "Échec de l'installation des dépendances manquantes"
+}
+
 install_zabbix() {
     if ask_user "Voulez-vous installer Zabbix ?"; then
+        fix_dependencies
         echo "--- Installation de Zabbix ---"
         wget -O /tmp/zabbix-release.deb https://repo.zabbix.com/zabbix/6.0/debian/pool/main/z/zabbix-release/zabbix-release_6.0-4+debian11_all.deb || die "Échec du téléchargement du dépôt Zabbix"
         dpkg -i /tmp/zabbix-release.deb || die "Échec de l'installation du dépôt Zabbix"
