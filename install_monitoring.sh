@@ -3,12 +3,13 @@ set -o pipefail
 set -o errtrace
 
 ################################################################################
-# Script d'installation pour Debian 12 (Bookworm) : Zabbix 6.4 (Serveur + Frontend),
-# Grafana, ELK, Suricata, etc. gérant correctement les clés GPG et dépôts pour
-# éviter les erreurs apt-get update (NO_PUBKEY).
+# Script d'installation pour Debian 12 (Bookworm) : Zabbix 7.0 (Serveur + Frontend),
+# Grafana, ELK, Suricata, etc.
+# Gestion des clés GPG et dépôts pour éviter les erreurs apt-get update.
+# L'installation de l'agent Zabbix est retirée.
 #
-# Auteur  : VAPOTANK (modifié pour Debian 12 et retrait de l'agent Zabbix)
-# Date    : 2025-03-17
+# Auteur  : VAPOTANK (modifié pour Debian 12 et Zabbix 7.0)
+# Date    : 2025-03-18
 # Usage   : sudo ./install_monitoring.sh
 ################################################################################
 
@@ -16,7 +17,7 @@ LOG_FILE="/var/log/auto_monitoring.log"
 declare -a ERRORS=()
 
 # ------------------------------------------------------------------------------
-#                            FONCTIONS LOG
+#                            FONCTIONS DE LOG
 # ------------------------------------------------------------------------------
 log_info() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" | tee -a "$LOG_FILE"
@@ -28,8 +29,6 @@ record_error() {
     ERRORS+=("$1")
     log_error "$1"
 }
-
-# Exécuter une commande et enregistrer l'erreur
 run_cmd() {
     log_info "Exécution : $*"
     "$@"
@@ -41,12 +40,10 @@ run_cmd() {
 }
 
 # ------------------------------------------------------------------------------
-#                            REPARATION / ROLLBACK
+#                       FONCTION DE RÉPARATION
 # ------------------------------------------------------------------------------
 repair_errors() {
     log_info "Tentative de réparation automatique des erreurs..."
-
-    # Exemple : Vérifier/redémarrer Zabbix Server
     if systemctl is-active --quiet zabbix-server; then
         log_info "Zabbix Server semble actif."
     else
@@ -70,13 +67,12 @@ repair_errors() {
 }
 
 # ------------------------------------------------------------------------------
-#                            VARIABLES DE CONFIG
+#                       VARIABLES DE CONFIGURATION
 # ------------------------------------------------------------------------------
 MYSQL_ROOT_PASSWORD="root123"
 ZABBIX_DB="zabbix"
 ZABBIX_DB_USER="zabbix"
 ZABBIX_DB_PASS="zabbix_pass"
-
 ZABBIX_SERVER_TIMEZONE="Europe/Paris"
 
 GRAFANA_ADMIN_USER="admin"
@@ -86,10 +82,11 @@ ENABLE_ELASTIC_SECURITY=true
 ES_PASSWORDS_FILE="/tmp/es_passwords.txt"
 KIBANA_ELASTIC_USER="elastic"
 
+# Répertoire pour stocker les clés GPG
 KEYRING_DIR="/usr/share/keyrings"
 
 # ------------------------------------------------------------------------------
-#                            FONCTIONS UTILES
+#                       FONCTIONS UTILES
 # ------------------------------------------------------------------------------
 ask_user() {
     local input
@@ -99,60 +96,60 @@ ask_user() {
         *) return 1 ;;
     esac
 }
-
 already_installed() {
     dpkg -s "$1" &>/dev/null
     return $?
 }
 
 # ------------------------------------------------------------------------------
-#                   IMPORT DES CLÉS GPG ET CONFIG DÉPÔTS
+#                IMPORT DES CLÉS GPG & CONFIGURATION DES DÉPÔTS
 # ------------------------------------------------------------------------------
 import_grafana_key() {
-    log_info "Import de la clé GPG Grafana + création du dépôt pour Debian 12..."
+    log_info "Import de la clé GPG Grafana et configuration du dépôt pour Debian 12..."
     mkdir -p "$KEYRING_DIR"
     run_cmd curl -fsSL https://packages.grafana.com/gpg.key \
-        | gpg --dearmor \
-        | tee "${KEYRING_DIR}/grafana-archive-keyring.gpg" >/dev/null
-
+         | gpg --dearmor \
+         | tee "${KEYRING_DIR}/grafana-archive-keyring.gpg" >/dev/null
     cat <<EOF >/etc/apt/sources.list.d/grafana.list
 deb [signed-by=${KEYRING_DIR}/grafana-archive-keyring.gpg] https://packages.grafana.com/oss/deb stable main
 EOF
 }
-
 import_elastic_key() {
-    log_info "Import de la clé GPG Elastic + création du dépôt pour Debian 12..."
+    log_info "Import de la clé GPG Elastic et configuration du dépôt pour Debian 12..."
     mkdir -p "$KEYRING_DIR"
     run_cmd curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch \
-        | gpg --dearmor \
-        | tee "${KEYRING_DIR}/elastic-archive-keyring.gpg" >/dev/null
-
+         | gpg --dearmor \
+         | tee "${KEYRING_DIR}/elastic-archive-keyring.gpg" >/dev/null
     cat <<EOF >/etc/apt/sources.list.d/elastic-7.x.list
 deb [signed-by=${KEYRING_DIR}/elastic-archive-keyring.gpg] https://artifacts.elastic.co/packages/7.x/apt stable main
 EOF
 }
-
 import_zabbix_repo() {
-    log_info "Installation du repository Zabbix 6.4 pour Debian 12..."
-    run_cmd wget -O /tmp/zabbix-release.deb \
-        https://repo.zabbix.com/zabbix/6.4/debian/pool/main/z/zabbix-release/zabbix-release_6.4-2+debian12_all.deb
-    run_cmd dpkg -i /tmp/zabbix-release.deb
+    log_info "Installation du repository Zabbix 7.0 pour Debian 12..."
+    # Téléchargement du paquet release pour Zabbix 7.0.
+    run_cmd wget -4 -O /tmp/zabbix-release.deb \
+      https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-release/zabbix-release_7.0-1+debian12_all.deb
+    if [ $? -eq 0 ]; then
+        run_cmd dpkg -i /tmp/zabbix-release.deb
+    else
+        record_error "Échec du téléchargement de zabbix-release pour Debian 12 (7.0)."
+    fi
 }
 
 # ------------------------------------------------------------------------------
-#                           INSTALLATION DE BASE
+#                         INSTALLATION DE BASE
 # ------------------------------------------------------------------------------
 install_base_packages() {
-    log_info "=== 1) Import des clés GPG & config dépôts ==="
+    log_info "=== Import des clés GPG & configuration des dépôts ==="
     run_cmd apt-get install -y gnupg curl wget lsb-release apt-transport-https software-properties-common
 
-    # Retrait potentiel des dépôts bullseye
+    # Retirer d'éventuelles références à Bullseye
     if [ -f /etc/apt/sources.list ]; then
         sed -i '/bullseye-security/d' /etc/apt/sources.list
         sed -i '/bullseye/d' /etc/apt/sources.list
     fi
 
-    # Ajout du bookworm-security si besoin
+    # Ajout du dépôt bookworm-security
     if ! grep -q "bookworm-security" /etc/apt/sources.list; then
         echo "deb http://security.debian.org/debian-security bookworm-security main contrib non-free-firmware" \
             >> /etc/apt/sources.list
@@ -167,11 +164,10 @@ install_base_packages() {
         sleep 5
     done
 
-    log_info "=== 2) Installation des paquets de base ==="
+    log_info "=== Installation des paquets de base ==="
     run_cmd apt-get upgrade -y
     run_cmd apt-get install -y python3 python3-pip python3-venv iptables ufw mariadb-server
-
-    log_info "Packages de base installés ou mis à jour avec succès."
+    log_info "Paquets de base installés ou mis à jour avec succès."
 }
 
 # ------------------------------------------------------------------------------
@@ -180,14 +176,12 @@ install_base_packages() {
 configure_mariadb() {
     log_info "Configuration du mot de passe root MySQL..."
     if ! mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" &>/dev/null; then
-        record_error "Impossible de se connecter à MySQL root (mot de passe = '${MYSQL_ROOT_PASSWORD}')."
+        record_error "Impossible de se connecter à MySQL en tant que root (mot de passe = '${MYSQL_ROOT_PASSWORD}')."
     fi
-
     run_cmd mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
 EOF
-
     log_info "Création de la base et de l'utilisateur Zabbix..."
     run_cmd mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
 CREATE DATABASE IF NOT EXISTS ${ZABBIX_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
@@ -195,32 +189,32 @@ CREATE USER IF NOT EXISTS '${ZABBIX_DB_USER}'@'localhost' IDENTIFIED BY '${ZABBI
 GRANT ALL PRIVILEGES ON ${ZABBIX_DB}.* TO '${ZABBIX_DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 EOF
-    log_info "Configuration MariaDB terminée."
+    log_info "Configuration de MariaDB terminée."
 }
 
 # ------------------------------------------------------------------------------
-#                        INSTALLATION DE ZABBIX (SERVEUR)
+#              INSTALLATION DU SERVEUR ZABBIX (sans agent)
 # ------------------------------------------------------------------------------
 install_zabbix_server() {
-    if ask_user "Installer Zabbix Server (sans l'agent) ?"; then
+    if ask_user "Installer Zabbix Server (sans agent) ?"; then
         if ! already_installed zabbix-server-mysql; then
-            log_info "Installation du paquet zabbix-server-mysql + zabbix-frontend-php..."
+            log_info "Installation des paquets zabbix-server-mysql et zabbix-frontend-php..."
             run_cmd apt-get update
-            # On n'inclut PAS zabbix-agent ici
-            run_cmd apt-get install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts
+            # On n'inclut pas zabbix-agent, zabbix-apache-conf ni zabbix-sql-scripts
+            run_cmd apt-get install -y zabbix-server-mysql zabbix-frontend-php
         fi
 
-        # Import du schéma si absent
+        # Tentative d'import du schéma (vérifiez si un fichier existe dans /usr/share/doc/zabbix*)
         local schema_file
         schema_file="$(find /usr/share/doc/zabbix* -type f -name '*create.sql.gz' 2>/dev/null | head -n1)"
         if [ -n "$schema_file" ]; then
             log_info "Import du schéma Zabbix depuis : $schema_file"
             zcat "$schema_file" | mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}"
         else
-            record_error "Aucun fichier de schéma Zabbix trouvé. Vérifiez l'installation de zabbix-sql-scripts."
+            record_error "Aucun fichier de schéma Zabbix trouvé. Veuillez importer le schéma manuellement."
         fi
 
-        # Configuration Apache
+        # Configuration Apache (si le fichier existe)
         if [ -f /etc/apache2/conf-available/zabbix.conf ]; then
             if ! grep -q "php_value date.timezone" /etc/apache2/conf-available/zabbix.conf; then
                 echo "php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}" >>/etc/apache2/conf-available/zabbix.conf
@@ -228,30 +222,38 @@ install_zabbix_server() {
                 sed -i "s|php_value date.timezone .*|php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}|" /etc/apache2/conf-available/zabbix.conf
             fi
         else
-            record_error "Le fichier /etc/apache2/conf-available/zabbix.conf est introuvable. Vérifiez l'installation de Zabbix."
+            record_error "Le fichier /etc/apache2/conf-available/zabbix.conf est introuvable. Veuillez créer ou adapter la configuration Apache."
         fi
 
-        # Configuration zabbix_server.conf
-        sed -i "s|^# DBPassword=.*|DBPassword=${ZABBIX_DB_PASS}|" /etc/zabbix/zabbix_server.conf
-        sed -i "s|^# DBUser=.*|DBUser=${ZABBIX_DB_USER}|" /etc/zabbix/zabbix_server.conf
-        sed -i "s|^# DBName=.*|DBName=${ZABBIX_DB}|" /etc/zabbix/zabbix_server.conf
-        if ! grep -q "^DBHost=" /etc/zabbix/zabbix_server.conf; then
-            echo "DBHost=localhost" >> /etc/zabbix/zabbix_server.conf
+        # Mise à jour de la configuration du serveur Zabbix (si le fichier existe)
+        if [ -f /etc/zabbix/zabbix_server.conf ]; then
+            sed -i "s|^# DBPassword=.*|DBPassword=${ZABBIX_DB_PASS}|" /etc/zabbix/zabbix_server.conf
+            sed -i "s|^# DBUser=.*|DBUser=${ZABBIX_DB_USER}|" /etc/zabbix/zabbix_server.conf
+            sed -i "s|^# DBName=.*|DBName=${ZABBIX_DB}|" /etc/zabbix/zabbix_server.conf
+            if ! grep -q "^DBHost=" /etc/zabbix/zabbix_server.conf; then
+                echo "DBHost=localhost" >> /etc/zabbix/zabbix_server.conf
+            fi
+        else
+            record_error "Le fichier /etc/zabbix/zabbix_server.conf est introuvable. Veuillez le créer manuellement."
         fi
 
-        mkdir -p /run/zabbix
-        chown -R zabbix:zabbix /run/zabbix
+        # Création du répertoire /run/zabbix si l'utilisateur zabbix existe
+        if id zabbix &>/dev/null; then
+            mkdir -p /run/zabbix
+            chown -R zabbix:zabbix /run/zabbix
+        else
+            record_error "L'utilisateur 'zabbix' n'existe pas. Vérifiez l'installation de zabbix-server-mysql."
+        fi
 
         run_cmd systemctl daemon-reload
-        # On n'active pas zabbix-agent, juste le serveur
         run_cmd systemctl enable zabbix-server apache2
         run_cmd systemctl restart zabbix-server apache2
 
         sleep 3
         if systemctl is-active --quiet zabbix-server; then
-            log_info "Zabbix Server installé et démarré. Accédez : http://<IP>/zabbix (Admin / zabbix)"
+            log_info "Zabbix Server est installé et démarré. Accédez à http://<IP>/zabbix (Admin / zabbix)."
         else
-            record_error "Zabbix Server ne démarre pas. Voir 'systemctl status zabbix-server'."
+            record_error "Zabbix Server ne démarre pas. Veuillez consulter 'systemctl status zabbix-server'."
         fi
     fi
 }
@@ -266,15 +268,13 @@ install_grafana() {
             run_cmd apt-get install -y grafana
             run_cmd systemctl enable --now grafana-server
         fi
-
         if [ -f /etc/grafana/grafana.ini ]; then
             sed -i "s|^;admin_user = .*|admin_user = ${GRAFANA_ADMIN_USER}|" /etc/grafana/grafana.ini
             sed -i "s|^;admin_password = .*|admin_password = ${GRAFANA_ADMIN_PASS}|" /etc/grafana/grafana.ini
-            systemctl restart grafana-server
+            run_cmd systemctl restart grafana-server
         else
             record_error "Le fichier /etc/grafana/grafana.ini est introuvable. Vérifiez l'installation de Grafana."
         fi
-
         log_info "Grafana installé : http://<IP>:3000 (user=${GRAFANA_ADMIN_USER}, pass=${GRAFANA_ADMIN_PASS})."
     fi
 }
@@ -298,7 +298,7 @@ install_elk() {
         run_cmd systemctl start elasticsearch logstash kibana
 
         if [ "$ENABLE_ELASTIC_SECURITY" = true ]; then
-            log_info "Activation xpack.security sur Elasticsearch..."
+            log_info "Activation de xpack.security sur Elasticsearch..."
             sed -i '/^#\?xpack.security.enabled:/d' /etc/elasticsearch/elasticsearch.yml
             echo "xpack.security.enabled: true" >> /etc/elasticsearch/elasticsearch.yml
             run_cmd systemctl restart elasticsearch
@@ -318,7 +318,7 @@ install_elk() {
                 record_error "Impossible de récupérer le mot de passe elastic."
             fi
         fi
-        log_info "ELK installé : http://<IP>:5601"
+        log_info "ELK installé : Accédez à http://<IP>:5601"
     fi
 }
 
@@ -330,12 +330,9 @@ install_suricata() {
         if ! already_installed suricata; then
             run_cmd apt-get install -y suricata
             run_cmd systemctl enable suricata
-            run_cmd systemctl stop suricata
-            run_cmd systemctl start suricata
+            run_cmd systemctl restart suricata
             log_info "Suricata installé."
         fi
-
-        # Intégration Filebeat
         if ask_user "Intégrer Suricata à ELK via Filebeat ?"; then
             if ! already_installed filebeat; then
                 run_cmd apt-get install -y filebeat
@@ -352,7 +349,7 @@ filebeat.inputs:
   fields_under_root: true
 
 output.elasticsearch:
-  hosts: ["localhost:9200"]
+  hosts: ["http://localhost:9200"]
 EOF
             log_info "Fichier de configuration Filebeat créé."
             run_cmd systemctl enable filebeat
@@ -363,7 +360,7 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-#                         CONFIG FIREWALL (UFW)
+#                         CONFIGURATION DU FIREWALL (UFW)
 # ------------------------------------------------------------------------------
 configure_firewall() {
     if ask_user "Configurer le firewall UFW avec des règles de base ?"; then
@@ -386,7 +383,7 @@ configure_firewall() {
 }
 
 # ------------------------------------------------------------------------------
-#                         AUTRES OUTILS (Fail2ban, Lynis, Vulners)
+#                    INSTALLATION DES OUTILS SUPPLÉMENTAIRES
 # ------------------------------------------------------------------------------
 install_fail2ban() {
     if ask_user "Installer et configurer Fail2ban ?"; then
@@ -424,12 +421,12 @@ install_vulners() {
             run_cmd pip install --upgrade pip vulners
             deactivate
         fi
-        log_info "Vulners installé /opt/vulners-venv."
+        log_info "Vulners installé dans /opt/vulners-venv."
     fi
 }
 
 # ------------------------------------------------------------------------------
-#                         DETECTION IP
+#                             DÉTECTION D'ADRESSES IP
 # ------------------------------------------------------------------------------
 detect_ip() {
     log_info "Adresses IP détectées :"
@@ -437,17 +434,14 @@ detect_ip() {
 }
 
 # ------------------------------------------------------------------------------
-#                         MAIN
+#                                  MAIN
 # ------------------------------------------------------------------------------
 main() {
-    log_info "=== Début de l'installation (Debian 12) ==="
+    log_info "=== Début de l'installation (Debian 12, Zabbix 7.0) ==="
     install_base_packages
     configure_mariadb
     configure_firewall
-
-    # Installation du serveur Zabbix (sans agent)
     install_zabbix_server
-
     install_grafana
     install_fail2ban
     install_lynis
