@@ -4,6 +4,7 @@
 # Script d'installation complet : Zabbix, Grafana, Fail2ban, Lynis, Vulners,
 # ELK (Elasticsearch, Logstash, Kibana), Suricata (optionnel),
 # avec installation automatique des dépendances (iptables, ufw, python3, pip, etc.)
+# ET import automatique du schéma SQL pour Zabbix (zabbix-sql-scripts).
 #
 # Auteur  : VAPOTANK
 # Date    : 2025-03-17
@@ -146,10 +147,20 @@ install_zabbix() {
         apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent \
            || die "Échec installation Zabbix"
 
-        echo "--- Import du schéma Zabbix dans la base ---"
-        zcat /usr/share/doc/zabbix-server-mysql/create.sql.gz | \
-            mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}" || \
-            echo "Peut-être déjà importé ou échec d'import..."
+        # Installer le package zabbix-sql-scripts pour être sûr de trouver le schema.sql.gz
+        apt install -y zabbix-sql-scripts
+
+        echo "--- Recherche du fichier schema.sql.gz (ou create.sql.gz) ---"
+        SCHEMA_FILE=$(find /usr/share/zabbix-sql-scripts -name "schema.sql.gz" -o -name "create.sql.gz" 2>/dev/null | head -n 1)
+
+        if [ -z "$SCHEMA_FILE" ]; then
+          echo "[WARNING] Impossible de trouver schema.sql.gz ou create.sql.gz dans /usr/share/zabbix-sql-scripts"
+          echo "La base Zabbix risque de ne pas être importée !"
+        else
+          echo "--- Import du schéma Zabbix dans la base ---"
+          zcat "$SCHEMA_FILE" | mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}" || \
+            echo "Échec lors de l'import du schéma. Vérifiez l'utilisateur/mot de passe MySQL."
+        fi
 
         echo "--- Configuration Zabbix (php.ini) ---"
         sed -i "s|.*date.timezone =.*|php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}|" /etc/apache2/conf-available/zabbix.conf || true
@@ -206,6 +217,7 @@ findtime = 600
 maxretry = 5
 [sshd]
 enabled = true
+logpath = /var/log/auth.log
 EOF
         systemctl enable --now fail2ban
         echo "✅ Fail2ban installé."
@@ -307,7 +319,6 @@ install_suricata() {
         systemctl enable suricata
         systemctl stop suricata
 
-        # Personnaliser suricata.yaml si besoin (HOME_NET, etc.)
         systemctl start suricata
         echo "✅ Suricata installé et démarré."
 
