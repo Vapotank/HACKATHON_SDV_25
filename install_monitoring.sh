@@ -196,24 +196,20 @@ configure_firewall() {
 ########################
 configure_mariadb() {
     log_info "Configuration du mot de passe root MySQL..."
-    # Tente de se connecter en tant que root sans mot de passe
-    if mysql -u root -e "SELECT 1" &>/dev/null; then
-        mysql -u root <<EOF
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
-FLUSH PRIVILEGES;
-EOF
-        check_exit "Modification du mot de passe root en mode sans mot de passe"
-    elif [ -f /etc/mysql/debian.cnf ]; then
-        log_info "Utilisation de /etc/mysql/debian.cnf pour configurer root..."
-        mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
-ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
-FLUSH PRIVILEGES;
-EOF
-        check_exit "Modification du mot de passe root via /etc/mysql/debian.cnf"
+    # Teste la connexion en tant que root avec le mot de passe fourni
+    if mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" &>/dev/null; then
+        log_info "Connexion à MySQL en tant que root réussie avec le mot de passe fourni."
     else
-        error_exit 3 "Impossible de se connecter à MySQL en tant que root. Vérifiez la configuration."
+        error_exit 3 "Impossible de se connecter à MySQL en tant que root avec le mot de passe '${MYSQL_ROOT_PASSWORD}'."
     fi
 
+    # Exécute la commande pour s'assurer que le mot de passe root est bien défini
+    mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+FLUSH PRIVILEGES;
+EOF
+    check_exit "Modification du mot de passe root"
+    
     log_info "Création de la base et de l'utilisateur Zabbix..."
     mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
 CREATE DATABASE IF NOT EXISTS ${ZABBIX_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
@@ -251,7 +247,7 @@ install_zabbix() {
             apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent || error_exit 4 "Installation des packages Zabbix a échoué."
             apt install -y zabbix-sql-scripts || error_exit 4 "Installation de zabbix-sql-scripts a échoué."
 
-            # Import du schéma SQL
+            # Import du schéma SQL (si présent)
             SCHEMA_FILE=$(find /usr/share/zabbix-sql-scripts -name "schema.sql.gz" -o -name "create.sql.gz" 2>/dev/null | head -n 1)
             if [ -n "$SCHEMA_FILE" ]; then
                 zcat "$SCHEMA_FILE" | mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}" || \
