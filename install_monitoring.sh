@@ -195,8 +195,9 @@ EOF
         check_exit "Modification du mot de passe root en mode sans mot de passe"
     elif [ -f /etc/mysql/debian.cnf ]; then
         log_info "Utilisation des identifiants debian-sys-maint pour configurer root..."
-        DEBIAN_USER=$(awk '/user/ {print $3; exit}' /etc/mysql/debian.cnf)
-        DEBIAN_PASS=$(awk '/password/ {print $3; exit}' /etc/mysql/debian.cnf)
+        # Extraction robuste depuis /etc/mysql/debian.cnf
+        DEBIAN_USER=$(awk -F'=' '/user/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}' /etc/mysql/debian.cnf)
+        DEBIAN_PASS=$(awk -F'=' '/password/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}' /etc/mysql/debian.cnf)
         mysql -u "$DEBIAN_USER" -p"$DEBIAN_PASS" <<EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
@@ -216,6 +217,7 @@ EOF
     check_exit "Création de la base et de l'utilisateur Zabbix"
     log_info "Configuration de MariaDB terminée."
 }
+
 
 ########################
 # DÉPENDANCES ZABBIX   #
