@@ -3,11 +3,11 @@ set -o pipefail
 set -o errtrace
 
 ################################################################################
-# Script d'installation pour Debian 12 (Bookworm) : Zabbix 6.4, Grafana, ELK,
-# Suricata, etc. en gérant correctement les clés GPG et dépôts pour éviter
-# les erreurs apt-get update (NO_PUBKEY).
+# Script d'installation pour Debian 12 (Bookworm) : Zabbix 6.4 (Serveur + Frontend),
+# Grafana, ELK, Suricata, etc. gérant correctement les clés GPG et dépôts pour
+# éviter les erreurs apt-get update (NO_PUBKEY).
 #
-# Auteur  : VAPOTANK (modifié pour Debian 12 et correctifs GPG)
+# Auteur  : VAPOTANK (modifié pour Debian 12 et retrait de l'agent Zabbix)
 # Date    : 2025-03-17
 # Usage   : sudo ./install_monitoring.sh
 ################################################################################
@@ -46,7 +46,7 @@ run_cmd() {
 repair_errors() {
     log_info "Tentative de réparation automatique des erreurs..."
 
-    # Ex: S'il faut importer schéma Zabbix après installation
+    # Exemple : Vérifier/redémarrer Zabbix Server
     if systemctl is-active --quiet zabbix-server; then
         log_info "Zabbix Server semble actif."
     else
@@ -86,11 +86,10 @@ ENABLE_ELASTIC_SECURITY=true
 ES_PASSWORDS_FILE="/tmp/es_passwords.txt"
 KIBANA_ELASTIC_USER="elastic"
 
-# Emplacement recommandé pour stocker les clés GPG
 KEYRING_DIR="/usr/share/keyrings"
 
 # ------------------------------------------------------------------------------
-#                            OUTILS / UTILS
+#                            FONCTIONS UTILES
 # ------------------------------------------------------------------------------
 ask_user() {
     local input
@@ -107,17 +106,15 @@ already_installed() {
 }
 
 # ------------------------------------------------------------------------------
-#                  IMPORTATION DES CLÉS GPG ET CONFIG DÉPÔTS
+#                   IMPORT DES CLÉS GPG ET CONFIG DÉPÔTS
 # ------------------------------------------------------------------------------
 import_grafana_key() {
     log_info "Import de la clé GPG Grafana + création du dépôt pour Debian 12..."
     mkdir -p "$KEYRING_DIR"
-    # On récupère la clé, on la convertit en .gpg
     run_cmd curl -fsSL https://packages.grafana.com/gpg.key \
         | gpg --dearmor \
         | tee "${KEYRING_DIR}/grafana-archive-keyring.gpg" >/dev/null
 
-    # Fichier de dépôt
     cat <<EOF >/etc/apt/sources.list.d/grafana.list
 deb [signed-by=${KEYRING_DIR}/grafana-archive-keyring.gpg] https://packages.grafana.com/oss/deb stable main
 EOF
@@ -137,41 +134,34 @@ EOF
 
 import_zabbix_repo() {
     log_info "Installation du repository Zabbix 6.4 pour Debian 12..."
-    # Zabbix 6.4 - version debian12 (bookworm)
     run_cmd wget -O /tmp/zabbix-release.deb \
         https://repo.zabbix.com/zabbix/6.4/debian/pool/main/z/zabbix-release/zabbix-release_6.4-2+debian12_all.deb
-
     run_cmd dpkg -i /tmp/zabbix-release.deb
-    # Normalement, ça installe la clé GPG zabbix et crée le repo en /etc/apt/sources.list.d/zabbix.list
 }
 
 # ------------------------------------------------------------------------------
-#                          INSTALLATION DES BASES
+#                           INSTALLATION DE BASE
 # ------------------------------------------------------------------------------
 install_base_packages() {
     log_info "=== 1) Import des clés GPG & config dépôts ==="
     run_cmd apt-get install -y gnupg curl wget lsb-release apt-transport-https software-properties-common
 
-    # Suppression de dépôts bullseye si présents
-    # (Au cas où on a un reliquat d'une version antérieure)
+    # Retrait potentiel des dépôts bullseye
     if [ -f /etc/apt/sources.list ]; then
         sed -i '/bullseye-security/d' /etc/apt/sources.list
         sed -i '/bullseye/d' /etc/apt/sources.list
     fi
 
-    # On ajoute le dépôt "bookworm-security" si besoin
+    # Ajout du bookworm-security si besoin
     if ! grep -q "bookworm-security" /etc/apt/sources.list; then
         echo "deb http://security.debian.org/debian-security bookworm-security main contrib non-free-firmware" \
             >> /etc/apt/sources.list
     fi
 
-    # Import des clés Grafana & Elastic
     import_grafana_key
     import_elastic_key
-    # Zabbix 6.4 pour Debian 12
     import_zabbix_repo
 
-    # Mise à jour
     for i in 1 2; do
         run_cmd apt-get update && break
         sleep 5
@@ -185,11 +175,10 @@ install_base_packages() {
 }
 
 # ------------------------------------------------------------------------------
-#                         CONFIGURATION MARIADB
+#                          CONFIGURATION MARIADB
 # ------------------------------------------------------------------------------
 configure_mariadb() {
     log_info "Configuration du mot de passe root MySQL..."
-    # Test connexion
     if ! mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" &>/dev/null; then
         record_error "Impossible de se connecter à MySQL root (mot de passe = '${MYSQL_ROOT_PASSWORD}')."
     fi
@@ -210,14 +199,15 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-#                         INSTALLATION ZABBIX
+#                        INSTALLATION DE ZABBIX (SERVEUR)
 # ------------------------------------------------------------------------------
-install_zabbix() {
-    if ask_user "Installer Zabbix Server + Agent ?"; then
+install_zabbix_server() {
+    if ask_user "Installer Zabbix Server (sans l'agent) ?"; then
         if ! already_installed zabbix-server-mysql; then
             log_info "Installation du paquet zabbix-server-mysql + zabbix-frontend-php..."
             run_cmd apt-get update
-            run_cmd apt-get install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent zabbix-sql-scripts
+            # On n'inclut PAS zabbix-agent ici
+            run_cmd apt-get install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts
         fi
 
         # Import du schéma si absent
@@ -230,7 +220,7 @@ install_zabbix() {
             record_error "Aucun fichier de schéma Zabbix trouvé. Vérifiez l'installation de zabbix-sql-scripts."
         fi
 
-        # Fichier apache2
+        # Configuration Apache
         if [ -f /etc/apache2/conf-available/zabbix.conf ]; then
             if ! grep -q "php_value date.timezone" /etc/apache2/conf-available/zabbix.conf; then
                 echo "php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}" >>/etc/apache2/conf-available/zabbix.conf
@@ -253,12 +243,13 @@ install_zabbix() {
         chown -R zabbix:zabbix /run/zabbix
 
         run_cmd systemctl daemon-reload
-        run_cmd systemctl enable zabbix-server zabbix-agent apache2
-        run_cmd systemctl restart zabbix-server zabbix-agent apache2
+        # On n'active pas zabbix-agent, juste le serveur
+        run_cmd systemctl enable zabbix-server apache2
+        run_cmd systemctl restart zabbix-server apache2
 
         sleep 3
         if systemctl is-active --quiet zabbix-server; then
-            log_info "Zabbix installé et démarré. Accédez : http://<IP>/zabbix (Admin / zabbix)"
+            log_info "Zabbix Server installé et démarré. Accédez : http://<IP>/zabbix (Admin / zabbix)"
         else
             record_error "Zabbix Server ne démarre pas. Voir 'systemctl status zabbix-server'."
         fi
@@ -372,7 +363,7 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-#                         PARE-FEU (UFW)
+#                         CONFIG FIREWALL (UFW)
 # ------------------------------------------------------------------------------
 configure_firewall() {
     if ask_user "Configurer le firewall UFW avec des règles de base ?"; then
@@ -395,7 +386,7 @@ configure_firewall() {
 }
 
 # ------------------------------------------------------------------------------
-#                         AUTRES OUTILS (Fail2ban, Lynis, etc.)
+#                         AUTRES OUTILS (Fail2ban, Lynis, Vulners)
 # ------------------------------------------------------------------------------
 install_fail2ban() {
     if ask_user "Installer et configurer Fail2ban ?"; then
@@ -453,7 +444,10 @@ main() {
     install_base_packages
     configure_mariadb
     configure_firewall
-    install_zabbix
+
+    # Installation du serveur Zabbix (sans agent)
+    install_zabbix_server
+
     install_grafana
     install_fail2ban
     install_lynis
