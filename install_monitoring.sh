@@ -11,7 +11,7 @@ set -o pipefail
 #  - Mode non-interactif pour APT (DEBIAN_FRONTEND=noninteractive).
 #  - Rollback minimal (si une étape échoue, on restaure les clés GPG et arrête).
 #
-# Auteur  : VAPOTANK
+# Auteur  : VAPOTANK (amélioré)
 # Date    : 2025-03-17
 # Usage   : sudo ./install_monitoring.sh
 ################################################################################
@@ -46,19 +46,15 @@ ELASTIC_KEY="$KEYRINGS_DIR/elastic.gpg"
 # ROLLBACK / ERREUR    #
 ########################
 
-# On sauvegarde l'état des fichiers de config avant de commencer
+# Sauvegarde initiale du fichier apt sources
 cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
 
 rollback() {
-  echo "[ROLLBACK] Une erreur est survenue. On restaure la config apt."
-  # Restaure la config apt
+  echo "[ROLLBACK] Une erreur est survenue. Restauration de la configuration APT."
   mv /etc/apt/sources.list.bak /etc/apt/sources.list 2>/dev/null || true
-
-  # Supprime nos keyrings si créés
   rm -f "$GRAFANA_KEY" "$ELASTIC_KEY" 2>/dev/null || true
   rm -f /etc/apt/sources.list.d/grafana.list 2>/dev/null || true
   rm -f /etc/apt/sources.list.d/elastic-7.x.list 2>/dev/null || true
-
   echo "[ROLLBACK] Terminé. Script arrêté."
   exit 1
 }
@@ -74,7 +70,6 @@ die() {
     exit 1
 }
 
-# Mode non-interactif pour apt
 export DEBIAN_FRONTEND=noninteractive
 
 ask_user() {
@@ -108,7 +103,6 @@ setup_grafana_repo() {
     echo "--- Configuration du dépôt Grafana (clé GPG dans /etc/apt/keyrings) ---"
     mkdir -p "$KEYRINGS_DIR"
     wget -qO "$GRAFANA_KEY" https://packages.grafana.com/gpg.key
-    # On déclare le dépôt avec signed-by
     cat <<EOF > /etc/apt/sources.list.d/grafana.list
 deb [signed-by=$GRAFANA_KEY] https://packages.grafana.com/oss/deb stable main
 EOF
@@ -156,10 +150,23 @@ configure_firewall() {
 ########################
 configure_mariadb() {
     echo "--- Configuration du mot de passe root MySQL ---"
-    mysql -u root <<EOF
+    # Tente de se connecter en tant que root sans mot de passe
+    if mysql -u root -e "SELECT 1" &>/dev/null; then
+        mysql -u root <<EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
 EOF
+    # Si la connexion échoue, essaie d'utiliser les credentials de debian-sys-maint
+    elif [ -f /etc/mysql/debian.cnf ]; then
+        echo "Utilisation des identifiants debian-sys-maint pour configurer root"
+        DEBIAN_ROOT_PASS=$(awk '/password/ {print $3; exit}' /etc/mysql/debian.cnf)
+        mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
+ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
+FLUSH PRIVILEGES;
+EOF
+    else
+        die "Impossible de se connecter à MySQL en tant que root. Veuillez vérifier la configuration actuelle."
+    fi
 
     echo "--- Création base et user Zabbix ---"
     mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
@@ -169,6 +176,7 @@ GRANT ALL PRIVILEGES ON ${ZABBIX_DB}.* TO '${ZABBIX_DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 }
+
 
 ########################
 # ZABBIX DEPENDANCES   #
@@ -197,7 +205,7 @@ install_zabbix() {
             apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent
             apt install -y zabbix-sql-scripts
 
-            # Import
+            # Import du schéma SQL
             SCHEMA_FILE=$(find /usr/share/zabbix-sql-scripts -name "schema.sql.gz" -o -name "create.sql.gz" 2>/dev/null | head -n 1)
             if [ -n "$SCHEMA_FILE" ]; then
               zcat "$SCHEMA_FILE" | mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}" || \
@@ -205,15 +213,27 @@ install_zabbix() {
             fi
         fi
 
-        # Config
+        # Configuration PHP et Zabbix
         sed -i "s|.*date.timezone =.*|php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}|" /etc/apache2/conf-available/zabbix.conf || true
         sed -i "s|^# DBPassword=.*|DBPassword=${ZABBIX_DB_PASS}|" /etc/zabbix/zabbix_server.conf
         sed -i "s|^# DBUser=.*|DBUser=${ZABBIX_DB_USER}|" /etc/zabbix/zabbix_server.conf
         sed -i "s|^# DBName=.*|DBName=${ZABBIX_DB}|" /etc/zabbix/zabbix_server.conf
 
+        # Création du répertoire pour le fichier PID de Zabbix
+        mkdir -p /run/zabbix
+        chown zabbix:zabbix /run/zabbix
+
+        # Recharger la configuration systemd et démarrer les services
+        systemctl daemon-reload
         systemctl enable zabbix-server zabbix-agent apache2
         systemctl restart zabbix-server zabbix-agent apache2
-        echo "✅ Zabbix installé. http://<IP>/zabbix (Admin / zabbix)."
+
+        # Vérification du démarrage de Zabbix Server
+        if systemctl is-active --quiet zabbix-server; then
+            echo "✅ Zabbix installé et démarré correctement. http://<IP>/zabbix (Admin / zabbix)."
+        else
+            echo "[ERROR] Zabbix Server ne démarre pas. Veuillez consulter 'systemctl status zabbix-server' et 'journalctl -xeu zabbix-server.service'."
+        fi
     fi
 }
 
@@ -310,7 +330,7 @@ install_elk() {
             echo "xpack.security.enabled: true" >> /etc/elasticsearch/elasticsearch.yml
             systemctl restart elasticsearch
             sleep 10
-            echo "Génération pass..."
+            echo "Génération des mots de passe ES..."
             /usr/share/elasticsearch/bin/elasticsearch-setup-passwords auto -b > "$ES_PASSWORDS_FILE" 2>/dev/null
             cat "$ES_PASSWORDS_FILE"
             NEW_ELASTIC_PASS=$(grep "PASSWORD elastic =" "$ES_PASSWORDS_FILE" | awk '{print $4}')
