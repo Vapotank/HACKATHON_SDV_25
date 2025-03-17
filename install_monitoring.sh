@@ -1,10 +1,15 @@
 #!/bin/bash
+set -o errexit
+set -o pipefail
 
 ################################################################################
 # Script d'installation complet : Zabbix, Grafana, Fail2ban, Lynis, Vulners,
 # ELK (Elasticsearch, Logstash, Kibana), Suricata (optionnel),
-# avec correction des erreurs liées à l'import SQL Zabbix, fail2ban (auth.log),
-# et vérification si déjà installé. Firewall UFW optionnel.
+# avec :
+#  - Import des clés GPG dans /etc/apt/keyrings pour éviter les avertissements
+#    "Key is stored in legacy trusted.gpg keyring".
+#  - Mode non-interactif pour APT (DEBIAN_FRONTEND=noninteractive).
+#  - Rollback minimal (si une étape échoue, on restaure les clés GPG et arrête).
 #
 # Auteur  : VAPOTANK
 # Date    : 2025-03-17
@@ -18,23 +23,47 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 # VARIABLES DE CREDITS #
 ########################
 
-# -- MySQL (MariaDB) --
 MYSQL_ROOT_PASSWORD="root123"      # Mot de passe root MySQL
-ZABBIX_DB="zabbix"                 # Nom de la base Zabbix
-ZABBIX_DB_USER="zabbix"            # User Zabbix
-ZABBIX_DB_PASS="zabbix_pass"       # Mot de passe user Zabbix
+ZABBIX_DB="zabbix"
+ZABBIX_DB_USER="zabbix"
+ZABBIX_DB_PASS="zabbix_pass"
 
-# -- Zabbix Frontend --
 ZABBIX_SERVER_TIMEZONE="Europe/Paris"
 
-# -- Grafana Admin --
 GRAFANA_ADMIN_USER="admin"
 GRAFANA_ADMIN_PASS="admin123"
 
-# -- Elasticsearch / Kibana --
-ENABLE_ELASTIC_SECURITY=true        # Passe à false pour garder ES sans mot de passe
-ES_PASSWORDS_FILE="/tmp/es_passwords.txt"  # Fichier où on stockera les mots de passe générés
-KIBANA_ELASTIC_USER="elastic"       # Par défaut, on utilisera l'utilisateur "elastic" dans Kibana
+ENABLE_ELASTIC_SECURITY=true
+ES_PASSWORDS_FILE="/tmp/es_passwords.txt"
+KIBANA_ELASTIC_USER="elastic"
+
+# Dossier où on stockera les clés GPG
+KEYRINGS_DIR="/etc/apt/keyrings"
+GRAFANA_KEY="$KEYRINGS_DIR/grafana.gpg"
+ELASTIC_KEY="$KEYRINGS_DIR/elastic.gpg"
+
+########################
+# ROLLBACK / ERREUR    #
+########################
+
+# On sauvegarde l'état des fichiers de config avant de commencer
+cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+
+rollback() {
+  echo "[ROLLBACK] Une erreur est survenue. On restaure la config apt."
+  # Restaure la config apt
+  mv /etc/apt/sources.list.bak /etc/apt/sources.list 2>/dev/null || true
+
+  # Supprime nos keyrings si créés
+  rm -f "$GRAFANA_KEY" "$ELASTIC_KEY" 2>/dev/null || true
+  rm -f /etc/apt/sources.list.d/grafana.list 2>/dev/null || true
+  rm -f /etc/apt/sources.list.d/elastic-7.x.list 2>/dev/null || true
+
+  echo "[ROLLBACK] Terminé. Script arrêté."
+  exit 1
+}
+
+trap rollback ERR
 
 ########################
 # FONCTIONS UTILES     #
@@ -45,6 +74,9 @@ die() {
     exit 1
 }
 
+# Mode non-interactif pour apt
+export DEBIAN_FRONTEND=noninteractive
+
 ask_user() {
     read -p "$1 (y/n): " response
     case "$response" in
@@ -53,7 +85,6 @@ ask_user() {
     esac
 }
 
-# Teste si le paquet est déjà installé (Debian/Ubuntu)
 already_installed() {
     dpkg -s "$1" &>/dev/null
     return $?
@@ -64,25 +95,45 @@ already_installed() {
 ########################
 install_base_packages() {
     echo "--- Mise à jour du système et installation des dépendances de base ---"
-    apt update && apt upgrade -y || die "Échec de la mise à jour du système"
+    apt update && apt upgrade -y
     apt install -y gnupg gnupg2 python3 python3-pip python3-venv \
                    curl wget lsb-release apt-transport-https \
-                   software-properties-common iptables ufw \
-        || die "Échec installation paquets de base"
+                   software-properties-common iptables ufw mariadb-server
 }
 
 ########################
-# 2) FIREWALL (UFW)    #
+# 2) IMPORT GPG/GRAFANA
+########################
+setup_grafana_repo() {
+    echo "--- Configuration du dépôt Grafana (clé GPG dans /etc/apt/keyrings) ---"
+    mkdir -p "$KEYRINGS_DIR"
+    wget -qO "$GRAFANA_KEY" https://packages.grafana.com/gpg.key
+    # On déclare le dépôt avec signed-by
+    cat <<EOF > /etc/apt/sources.list.d/grafana.list
+deb [signed-by=$GRAFANA_KEY] https://packages.grafana.com/oss/deb stable main
+EOF
+}
+
+########################
+# 3) IMPORT GPG/ELASTIC
+########################
+setup_elastic_repo() {
+    echo "--- Configuration du dépôt Elastic (clé GPG dans /etc/apt/keyrings) ---"
+    mkdir -p "$KEYRINGS_DIR"
+    wget -qO "$ELASTIC_KEY" https://artifacts.elastic.co/GPG-KEY-elasticsearch
+    cat <<EOF > /etc/apt/sources.list.d/elastic-7.x.list
+deb [signed-by=$ELASTIC_KEY] https://artifacts.elastic.co/packages/7.x/apt stable main
+EOF
+}
+
+########################
+# FIREWALL (UFW)       #
 ########################
 configure_firewall() {
     if ask_user "Voulez-vous configurer un firewall UFW avec quelques règles de base ?"; then
-        # Vérifie si UFW est déjà installé
-        if already_installed ufw; then
-            echo "UFW déjà installé, on vérifie juste la config..."
-        else
-            apt install -y ufw || die "Échec de l'installation d'ufw"
+        if ! already_installed ufw; then
+            apt install -y ufw
         fi
-
         ufw default deny incoming
         ufw default allow outgoing
         ufw allow ssh
@@ -101,17 +152,9 @@ configure_firewall() {
 }
 
 ########################
-# 3) MARIADB           #
+# MARIADB CONFIG       #
 ########################
-install_mariadb() {
-    if already_installed mariadb-server; then
-        echo "MariaDB est déjà installé. On saute l'installation."
-    else
-        echo "--- Installation de MariaDB (MySQL) ---"
-        apt install -y mariadb-server || die "Échec de l'installation de MariaDB"
-        systemctl enable --now mariadb
-    fi
-
+configure_mariadb() {
     echo "--- Configuration du mot de passe root MySQL ---"
     mysql -u root <<EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
@@ -128,41 +171,234 @@ EOF
 }
 
 ########################
-# 4) FIX DEP ZABBIX    #
+# ZABBIX DEPENDANCES   #
 ########################
 fix_dependencies_zabbix() {
-    # Ajouter bullseye-security si besoin (pour libssl1.1 etc.)
     if ! grep -q "bullseye-security" /etc/apt/sources.list ; then
         echo "deb http://security.debian.org/debian-security bullseye-security main" >> /etc/apt/sources.list
     fi
     apt update
-    apt install -y libssl1.1 libldap-2.4-2 || echo "Dépendances Zabbix déjà satisfaites ou introuvables."
+    apt install -y libssl1.1 libldap-2.4-2 || true
 }
 
 ########################
-# 5) INSTALL ZABBIX    #
+# INSTALL ZABBIX       #
 ########################
 install_zabbix() {
     if ask_user "Voulez-vous installer Zabbix Server + Agent ?"; then
-
-        # Vérifier si zabbix-server-mysql est déjà installé
-        if already_installed zabbix-server-mysql; then
-            echo "Zabbix Server déjà installé, on saute la partie installation."
-        else
+        if ! already_installed zabbix-server-mysql; then
             fix_dependencies_zabbix
 
             echo "--- Installation de Zabbix Server + Agent ---"
             wget -O /tmp/zabbix-release.deb \
-              https://repo.zabbix.com/zabbix/6.0/debian/pool/main/z/zabbix-release/zabbix-release_6.0-4+debian11_all.deb \
-              || die "Échec du téléchargement du dépôt Zabbix"
-            dpkg -i /tmp/zabbix-release.deb || die "Échec de l'installation du dépôt Zabbix"
+              https://repo.zabbix.com/zabbix/6.0/debian/pool/main/z/zabbix-release/zabbix-release_6.0-4+debian11_all.deb
+            dpkg -i /tmp/zabbix-release.deb
             apt update
-            apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent \
-               || die "Échec installation Zabbix"
-
-            # Installer le package zabbix-sql-scripts pour l'import
+            apt install -y zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-agent
             apt install -y zabbix-sql-scripts
 
-            # Import du schéma
+            # Import
             SCHEMA_FILE=$(find /usr/share/zabbix-sql-scripts -name "schema.sql.gz" -o -name "create.sql.gz" 2>/dev/null | head -n 1)
-       
+            if [ -n "$SCHEMA_FILE" ]; then
+              zcat "$SCHEMA_FILE" | mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}" || \
+                echo "Échec import schéma. Vérifiez user/pass MySQL."
+            fi
+        fi
+
+        # Config
+        sed -i "s|.*date.timezone =.*|php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}|" /etc/apache2/conf-available/zabbix.conf || true
+        sed -i "s|^# DBPassword=.*|DBPassword=${ZABBIX_DB_PASS}|" /etc/zabbix/zabbix_server.conf
+        sed -i "s|^# DBUser=.*|DBUser=${ZABBIX_DB_USER}|" /etc/zabbix/zabbix_server.conf
+        sed -i "s|^# DBName=.*|DBName=${ZABBIX_DB}|" /etc/zabbix/zabbix_server.conf
+
+        systemctl enable zabbix-server zabbix-agent apache2
+        systemctl restart zabbix-server zabbix-agent apache2
+        echo "✅ Zabbix installé. http://<IP>/zabbix (Admin / zabbix)."
+    fi
+}
+
+########################
+# INSTALL GRAFANA      #
+########################
+install_grafana() {
+    if ask_user "Voulez-vous installer Grafana ?"; then
+        if ! already_installed grafana; then
+            setup_grafana_repo
+            apt update
+            apt install -y grafana
+            systemctl enable --now grafana-server
+        fi
+        sed -i "s/^;admin_user = .*/admin_user = ${GRAFANA_ADMIN_USER}/" /etc/grafana/grafana.ini
+        sed -i "s/^;admin_password = .*/admin_password = ${GRAFANA_ADMIN_PASS}/" /etc/grafana/grafana.ini
+        systemctl restart grafana-server
+        echo "✅ Grafana installé : http://<IP>:3000 (user=${GRAFANA_ADMIN_USER}, pass=${GRAFANA_ADMIN_PASS})."
+    fi
+}
+
+########################
+# INSTALL FAIL2BAN     #
+########################
+install_fail2ban() {
+    if ask_user "Voulez-vous installer et configurer Fail2ban ?"; then
+        if ! already_installed fail2ban; then
+            apt install -y fail2ban
+        fi
+        cat <<EOF > /etc/fail2ban/jail.local
+[DEFAULT]
+bantime = 3600
+findtime = 600
+maxretry = 5
+[sshd]
+enabled = true
+logpath = /var/log/auth.log
+EOF
+        systemctl enable --now fail2ban
+        echo "✅ Fail2ban ok."
+    fi
+}
+
+########################
+# INSTALL LYNIS        #
+########################
+install_lynis() {
+    if ask_user "Voulez-vous installer Lynis pour l'audit ?"; then
+        if ! already_installed lynis; then
+            apt install -y lynis
+        fi
+        echo "✅ Lynis installé."
+    fi
+}
+
+########################
+# INSTALL VULNERS      #
+########################
+install_vulners() {
+    if ask_user "Voulez-vous installer Vulners ?"; then
+        if [ ! -d "/opt/vulners-venv" ]; then
+            python3 -m venv /opt/vulners-venv
+            source /opt/vulners-venv/bin/activate
+            pip install --upgrade pip vulners
+            deactivate
+        fi
+        echo "✅ Vulners installé. (env /opt/vulners-venv)"
+    fi
+}
+
+########################
+# INSTALL ELK          #
+########################
+install_elk() {
+    if ask_user "Voulez-vous installer ELK ?"; then
+        setup_elastic_repo
+        apt update
+        if ! already_installed elasticsearch; then
+            apt install -y elasticsearch
+        fi
+        if ! already_installed logstash; then
+            apt install -y logstash
+        fi
+        if ! already_installed kibana; then
+            apt install -y kibana
+        fi
+
+        systemctl enable elasticsearch logstash kibana
+        systemctl start elasticsearch logstash kibana
+
+        if [ "$ENABLE_ELASTIC_SECURITY" = true ]; then
+            echo "Activation xpack security..."
+            sed -i '/^#\?xpack.security.enabled:/d' /etc/elasticsearch/elasticsearch.yml
+            echo "xpack.security.enabled: true" >> /etc/elasticsearch/elasticsearch.yml
+            systemctl restart elasticsearch
+            sleep 10
+            echo "Génération pass..."
+            /usr/share/elasticsearch/bin/elasticsearch-setup-passwords auto -b > "$ES_PASSWORDS_FILE" 2>/dev/null
+            cat "$ES_PASSWORDS_FILE"
+            NEW_ELASTIC_PASS=$(grep "PASSWORD elastic =" "$ES_PASSWORDS_FILE" | awk '{print $4}')
+            if [ -n "$NEW_ELASTIC_PASS" ]; then
+                sed -i "s|^#\?elasticsearch.username:.*|elasticsearch.username: \"$KIBANA_ELASTIC_USER\"|" /etc/kibana/kibana.yml
+                sed -i "s|^#\?elasticsearch.password:.*|elasticsearch.password: \"$NEW_ELASTIC_PASS\"|" /etc/kibana/kibana.yml
+                sed -i "s|^#\?elasticsearch.hosts:.*|elasticsearch.hosts: [\"http://localhost:9200\"]|" /etc/kibana/kibana.yml
+                systemctl restart kibana
+            fi
+            echo "✅ Sécurité ES activée."
+        fi
+
+        echo "✅ ELK installé : http://<IP>:5601"
+    fi
+}
+
+########################
+# INSTALL SURICATA     #
+########################
+install_suricata() {
+    if ask_user "Voulez-vous installer Suricata (IDS/IPS) ?"; then
+        if ! already_installed suricata; then
+            apt install -y suricata
+            systemctl enable suricata
+            systemctl stop suricata
+            systemctl start suricata
+            echo "✅ Suricata installé."
+        fi
+
+        if ask_user "Intégrer Suricata à ELK (Filebeat) ?"; then
+            if ! already_installed filebeat; then
+                apt install -y filebeat
+            fi
+            cat <<EOF > /etc/filebeat/filebeat.yml
+filebeat.inputs:
+- type: filestream
+  id: suricata-logs
+  enabled: true
+  paths:
+    - /var/log/suricata/*.log
+  fields:
+    type: suricata
+  fields_under_root: true
+
+output.elasticsearch:
+  hosts: ["localhost:9200"]
+EOF
+            systemctl enable filebeat
+            systemctl restart filebeat
+            echo "✅ Suricata → ELK via Filebeat activé."
+        fi
+    fi
+}
+
+########################
+# DETECT IP            #
+########################
+detect_ip() {
+    echo "--- Détection de l'adresse IP du serveur ---"
+    ip addr show | grep 'inet ' | awk '{print $2}'
+}
+
+########################
+# MAIN                 #
+########################
+main() {
+    echo "=== Début de l'installation du monitoring complet ==="
+    install_base_packages
+    configure_firewall
+    configure_mariadb
+    install_zabbix
+    install_grafana
+    install_fail2ban
+    install_lynis
+    install_vulners
+    install_elk
+    install_suricata
+    detect_ip
+    echo "=== Installation terminée ! ==="
+    echo "---------------------------------"
+    echo "Infos / Credentials :"
+    echo "  - MySQL root      : $MYSQL_ROOT_PASSWORD"
+    echo "  - Zabbix DB       : $ZABBIX_DB (user=$ZABBIX_DB_USER / pass=$ZABBIX_DB_PASS)"
+    echo "  - Zabbix Frontend : http://<IP>/zabbix (Admin / zabbix)"
+    echo "  - Grafana         : http://<IP>:3000 (user=$GRAFANA_ADMIN_USER / pass=$GRAFANA_ADMIN_PASS)"
+    echo "  - ELK / Kibana    : http://<IP>:5601"
+    echo "    -> Mots de passe ES (si activée) dans : $ES_PASSWORDS_FILE"
+    echo "Logs d'installation : $LOG_FILE"
+}
+
+main
