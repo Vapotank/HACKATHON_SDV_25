@@ -194,15 +194,12 @@ FLUSH PRIVILEGES;
 EOF
         check_exit "Modification du mot de passe root en mode sans mot de passe"
     elif [ -f /etc/mysql/debian.cnf ]; then
-        log_info "Utilisation des identifiants debian-sys-maint pour configurer root..."
-        # Extraction robuste depuis /etc/mysql/debian.cnf
-        DEBIAN_USER=$(awk -F'=' '/user/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}' /etc/mysql/debian.cnf)
-        DEBIAN_PASS=$(awk -F'=' '/password/ {gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2; exit}' /etc/mysql/debian.cnf)
-        mysql -u "$DEBIAN_USER" -p"$DEBIAN_PASS" <<EOF
+        log_info "Utilisation de /etc/mysql/debian.cnf pour configurer root..."
+        mysql --defaults-file=/etc/mysql/debian.cnf <<EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
 EOF
-        check_exit "Modification du mot de passe root via debian-sys-maint"
+        check_exit "Modification du mot de passe root via /etc/mysql/debian.cnf"
     else
         error_exit 3 "Impossible de se connecter à MySQL en tant que root. Vérifiez la configuration."
     fi
@@ -217,6 +214,8 @@ EOF
     check_exit "Création de la base et de l'utilisateur Zabbix"
     log_info "Configuration de MariaDB terminée."
 }
+
+
 
 
 ########################
