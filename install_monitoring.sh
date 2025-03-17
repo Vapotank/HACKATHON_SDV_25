@@ -23,7 +23,7 @@ ask_user() {
 update_system() {
     echo "--- Mise à jour du système ---"
     apt update && apt upgrade -y || die "Échec de la mise à jour du système"
-    apt install -y gnupg gnupg2 || die "Échec de l'installation des paquets GNUPG nécessaires"
+    apt install -y gnupg gnupg2 python3-venv python3-pip || die "Échec de l'installation des paquets nécessaires"
 }
 
 fix_dependencies() {
@@ -49,7 +49,6 @@ install_zabbix() {
 install_grafana() {
     if ask_user "Voulez-vous installer Grafana ?"; then
         echo "--- Installation de Grafana ---"
-        apt install -y gnupg gnupg2 || die "Échec de l'installation de GNUPG requis pour ajouter la clé GPG"
         wget -q -O - https://packages.grafana.com/gpg.key | apt-key add - || die "Échec de l'ajout de la clé GPG"
         echo "deb https://packages.grafana.com/oss/deb stable main" > /etc/apt/sources.list.d/grafana.list
         apt update && apt install -y grafana || die "Échec de l'installation de Grafana"
@@ -89,8 +88,10 @@ install_lynis() {
 install_vulners() {
     if ask_user "Voulez-vous installer Vulners pour la détection des CVE ?"; then
         echo "--- Installation de Vulners ---"
-        apt install -y python3-pip || die "Échec de l'installation de pip"
-        pip3 install vulners || die "Échec de l'installation de Vulners-cli"
+        python3 -m venv /opt/vulners-venv
+        source /opt/vulners-venv/bin/activate
+        pip install vulners || die "Échec de l'installation de Vulners-cli"
+        deactivate
     else
         echo "Vulners ignoré."
     fi
