@@ -1,121 +1,31 @@
 #!/bin/bash
 
-# ================================================
-#  Système de Gestion & Monitoring - VAPOTANK 
-# ================================================
-# Version : 1.1 (2025-03-18)
-# Fonctionnalités :
-#  ✅ Vérification des logs système et distant
-#  ✅ Audit de sécurité (Lynis) local et distant
-#  ✅ Vérification des vulnérabilités (Vulners) local et distant
-#  ✅ Affichage des audits précédents
-#  ✅ Gestion complète des services de monitoring
-#  ✅ Support pour ELK, Zabbix et Grafana
-# ================================================
+# ==========================================================
+# 🛠️ Système de Gestion & Monitoring 🛠️
+# ==========================================================
+# Ce script permet d'auditer et de gérer les services de monitoring
+# Intègre Lynis, Vulners, logs système et vérification de vulnérabilités
+# ==========================================================
 
 LOG_DIR="/var/log/monitoring"
+VULNERS_API_KEY="DIGNQ4NM6A55C5NZ0L6LTZCARDNAEWI25QY4VM3OB5AZPWDTW65ZVTY3BVBBJ2TF"
+
 mkdir -p "$LOG_DIR"
 
-# ================================================
-# 🎨 Affichage du logo ASCII
-# ================================================
-afficher_banniere() {
+# ==========================================================
+# 🎨 Fonction d'affichage du menu en ASCII
+# ==========================================================
+show_menu() {
     clear
-    export LC_ALL=en_US.UTF-8
-    export LANG=en_US.UTF-8
-
-    echo -e "\e[1;34m"
-    cat << "EOF"
-  ███╗   ███╗ ██████╗ ███╗   ██╗ █████╗ ██████╗ ███████╗
-  ████╗ ████║██╔═══██╗████╗  ██║██╔══██╗██╔══██╗██╔════╝
-  ██╔████╔██║██║   ██║██╔██╗ ██║███████║██████╔╝█████╗  
-  ██║╚██╔╝██║██║   ██║██║╚██╗██║██╔══██║██╔═══╝ ██╔══╝  
-  ██║ ╚═╝ ██║╚██████╔╝██║ ╚████║██║  ██║██║     ███████╗
-  ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝     ╚══════╝
-EOF
+    echo -e "\e[36m"
+    echo " ██████╗  █████╗ ████████╗ █████╗ ███╗   ██╗███████╗████████╗ "
+    echo " ██╔══██╗██╔══██╗╚══██╔══╝██╔══██╗████╗  ██║██╔════╝╚══██╔══╝ "
+    echo " ██████╔╝███████║   ██║   ███████║██╔██╗ ██║█████╗     ██║    "
+    echo " ██╔═══╝ ██╔══██║   ██║   ██╔══██║██║╚██╗██║██╔══╝     ██║    "
+    echo " ██║     ██║  ██║   ██║   ██║  ██║██║ ╚████║███████╗   ██║    "
+    echo " ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝    "
     echo -e "\e[0m"
-}
-
-# ================================================
-# 🛠️  Fonctions Utilitaires
-# ================================================
-die() {
-    echo "[ERROR] $1" >&2
-    exit 1
-}
-
-ask_user() {
-    read -p "$1 (y/n): " response
-    case "$response" in
-        [yY][eE][sS]|[yY]) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-# ================================================
-# 📂 Vérification des logs (local & distant)
-# ================================================
-verifier_logs() {
-    echo "📌 Vérification des logs système..."
-    journalctl -xe --no-pager | tail -n 30
-}
-
-verifier_logs_distant() {
-    read -p "🔹 Entrez l'adresse IP du serveur distant : " serveur
-    echo "📌 Vérification des logs sur $serveur..."
-    ssh "$serveur" "journalctl -xe --no-pager | tail -n 30"
-}
-
-# ================================================
-# 🔍 Audit de Sécurité (local & distant)
-# ================================================
-auditer_securite() {
-    echo "📌 Lancement de Lynis..."
-    lynis audit system | tee "$LOG_DIR/audit_$(date +%F_%H%M).log"
-    echo "✅ Audit terminé."
-}
-
-auditer_securite_distant() {
-    read -p "🔹 Entrez l'adresse IP du serveur distant : " serveur
-    echo "📌 Audit de sécurité distant via SSH sur $serveur..."
-    ssh "$serveur" "lynis audit system" | tee "$LOG_DIR/audit_distant_$(date +%F_%H%M).log"
-    echo "✅ Audit distant terminé."
-}
-
-# ================================================
-# 🔎 Vérification des vulnérabilités (Vulners)
-# ================================================
-verifier_cve() {
-    echo "📌 Vérification des vulnérabilités avec Vulners..."
-    source /opt/vulners-venv/bin/activate
-    python3 -c "import vulners; v = vulners.Vulners(api_key='DIGNQ4NM6A55C5NZ0L6LTZCARDNAEWI25QY4VM3OB5AZPWDTW65ZVTY3BVBBJ2TF'); print(v.software_audit())"
-    deactivate
-    echo "✅ Vérification des CVE terminée."
-}
-
-verifier_cve_distant() {
-    read -p "🔹 Entrez l'adresse IP du serveur distant : " serveur
-    echo "📌 Vérification des vulnérabilités sur $serveur..."
-    ssh "$serveur" "source /opt/vulners-venv/bin/activate && python3 -c \"import vulners; v = vulners.Vulners(api_key='DIGNQ4NM6A55C5NZ0L6LTZCARDNAEWI25QY4VM3OB5AZPWDTW65ZVTY3BVBBJ2TF'); print(v.software_audit())\" && deactivate"
-    echo "✅ Vérification des CVE distante terminée."
-}
-
-# ================================================
-# 📜 Afficher les audits précédents
-# ================================================
-afficher_audits() {
-    echo "📌 Affichage des audits précédents..."
-    ls -lt "$LOG_DIR" | grep "audit_" | awk '{print $9}'
-    read -p "🔹 Entrez le nom du fichier à afficher : " fichier
-    cat "$LOG_DIR/$fichier"
-}
-
-# ================================================
-# 🏗️ Menu Principal
-# ================================================
-while true; do
-    afficher_banniere
-    echo "================================================="
+    echo "=========================================================="
     echo " 1️⃣  Vérifier les logs système (local)"
     echo " 2️⃣  Vérifier les logs d'un autre serveur"
     echo " 3️⃣  Lancer un audit de sécurité (Lynis - local)"
@@ -124,19 +34,120 @@ while true; do
     echo " 6️⃣  Vérifier les vulnérabilités (Vulners - distant)"
     echo " 7️⃣  Afficher les audits précédents"
     echo " 8️⃣  Quitter"
-    echo "================================================="
-    read -p "➡️  Choisissez une option : " choix
+    echo "=========================================================="
+}
 
-    case $choix in
-        1) verifier_logs ;;
-        2) verifier_logs_distant ;;
-        3) auditer_securite ;;
-        4) auditer_securite_distant ;;
-        5) verifier_cve ;;
-        6) verifier_cve_distant ;;
-        7) afficher_audits ;;
-        8) echo "👋 Au revoir !"; exit 0 ;;
-        *) echo "❌ Option invalide. Réessayez." ;;
-    esac
+# ==========================================================
+# 📝 Vérifier les logs système (local)
+# ==========================================================
+check_logs_local() {
+    echo "📌 Vérification des logs locaux..."
+    journalctl -n 50 --no-pager > "$LOG_DIR/system_logs.txt"
+    cat "$LOG_DIR/system_logs.txt"
+    echo "✅ Logs enregistrés dans $LOG_DIR/system_logs.txt"
     read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 📝 Vérifier les logs d'un autre serveur (SSH)
+# ==========================================================
+check_logs_remote() {
+    read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
+    echo "📌 Vérification des logs sur $SERVER_IP..."
+    ssh root@$SERVER_IP "journalctl -n 50 --no-pager" > "$LOG_DIR/remote_logs_$SERVER_IP.txt"
+    cat "$LOG_DIR/remote_logs_$SERVER_IP.txt"
+    echo "✅ Logs enregistrés dans $LOG_DIR/remote_logs_$SERVER_IP.txt"
+    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 🔍 Lancer un audit de sécurité avec Lynis
+# ==========================================================
+run_lynis_audit() {
+    echo "📌 Exécution d'un audit de sécurité avec Lynis..."
+    lynis audit system > "$LOG_DIR/lynis_audit.txt"
+    cat "$LOG_DIR/lynis_audit.txt"
+    echo "✅ Audit enregistré dans $LOG_DIR/lynis_audit.txt"
+    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 🔍 Lancer un audit de sécurité sur un serveur distant
+# ==========================================================
+run_lynis_audit_remote() {
+    read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
+    echo "📌 Exécution d'un audit de sécurité sur $SERVER_IP..."
+    ssh root@$SERVER_IP "lynis audit system" > "$LOG_DIR/lynis_audit_$SERVER_IP.txt"
+    cat "$LOG_DIR/lynis_audit_$SERVER_IP.txt"
+    echo "✅ Audit enregistré dans $LOG_DIR/lynis_audit_$SERVER_IP.txt"
+    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 🛡️ Vérification des vulnérabilités avec Vulners
+# ==========================================================
+check_vulners_local() {
+    echo "📌 Vérification des vulnérabilités avec Vulners..."
+    source /opt/vulners-venv/bin/activate
+    python3 -c "
+import vulners, subprocess
+v = vulners.VulnersApi(api_key='$VULNERS_API_KEY')
+os_version = subprocess.getoutput('lsb_release -rs')
+packages = subprocess.getoutput('dpkg-query -W -f=\"${Package} ${Version}\\n\"').splitlines()
+result = v.software_audit(os='Debian', version=os_version, packages=packages)
+print(result)
+" > "$LOG_DIR/vulners_audit.txt"
+    deactivate
+    cat "$LOG_DIR/vulners_audit.txt"
+    echo "✅ Audit enregistré dans $LOG_DIR/vulners_audit.txt"
+    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 🛡️ Vérification des vulnérabilités sur un serveur distant
+# ==========================================================
+check_vulners_remote() {
+    read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
+    echo "📌 Vérification des vulnérabilités sur $SERVER_IP..."
+    ssh root@$SERVER_IP "source /opt/vulners-venv/bin/activate && python3 -c '
+import vulners, subprocess
+v = vulners.VulnersApi(api_key=\"$VULNERS_API_KEY\")
+os_version = subprocess.getoutput(\"lsb_release -rs\")
+packages = subprocess.getoutput(\"dpkg-query -W -f=\\\"${Package} ${Version}\\\\n\\\"\").splitlines()
+result = v.software_audit(os=\"Debian\", version=os_version, packages=packages)
+print(result)
+' > /var/log/vulners_audit_$SERVER_IP.txt && deactivate"
+    ssh root@$SERVER_IP "cat /var/log/vulners_audit_$SERVER_IP.txt"
+    echo "✅ Audit enregistré sur le serveur distant"
+    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 📂 Affichage des audits précédents
+# ==========================================================
+show_previous_audits() {
+    echo "📂 Liste des audits disponibles :"
+    ls -1 "$LOG_DIR"
+    read -p "📂 Entrez le nom du fichier à afficher : " FILE
+    cat "$LOG_DIR/$FILE"
+    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
+}
+
+# ==========================================================
+# 🚀 Boucle principale
+# ==========================================================
+while true; do
+    show_menu
+    read -p "➡️  Choisissez une option : " choice
+    case $choice in
+        1) check_logs_local ;;
+        2) check_logs_remote ;;
+        3) run_lynis_audit ;;
+        4) run_lynis_audit_remote ;;
+        5) check_vulners_local ;;
+        6) check_vulners_remote ;;
+        7) show_previous_audits ;;
+        8) exit 0 ;;
+        *) echo "❌ Option invalide !" ;;
+    esac
 done
