@@ -5,10 +5,11 @@ set -o errtrace
 ################################################################################
 # Script d'installation pour Debian 12 (Bookworm) : Zabbix 7.0 (Serveur + Frontend),
 # Grafana, ELK, Suricata, etc.
-# Gestion des clés GPG et dépôts pour éviter les erreurs apt-get update.
-# L'installation de l'agent Zabbix est retirée.
 #
-# Auteur  : VAPOTANK (modifié pour Debian 12 et Zabbix 7.0)
+# Ce script propose une saisie interactive des identifiants ou l'utilisation
+# de valeurs par défaut définies dans le script.
+#
+# Auteur  : VAPOTANK (version interactive)
 # Date    : 2025-03-18
 # Usage   : sudo ./install_monitoring.sh
 ################################################################################
@@ -17,7 +18,7 @@ LOG_FILE="/var/log/auto_monitoring.log"
 declare -a ERRORS=()
 
 # ------------------------------------------------------------------------------
-#                            FONCTIONS DE LOG
+#              FONCTIONS DE LOG ET D'EXÉCUTION
 # ------------------------------------------------------------------------------
 log_info() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] $1" | tee -a "$LOG_FILE"
@@ -40,44 +41,58 @@ run_cmd() {
 }
 
 # ------------------------------------------------------------------------------
-#                       FONCTION DE RÉPARATION
+#                   FONCTION DE RÉPARATION
 # ------------------------------------------------------------------------------
 repair_errors() {
     log_info "Tentative de réparation automatique des erreurs..."
+    # On tente de redémarrer le serveur Zabbix seul
+    run_cmd systemctl restart zabbix-server
     if systemctl is-active --quiet zabbix-server; then
-        log_info "Zabbix Server semble actif."
+        log_info "Zabbix Server fonctionne après réparation."
     else
-        log_info "Zabbix Server inactif. Tentative de redémarrage..."
-        run_cmd systemctl restart zabbix-server
-        if systemctl is-active --quiet zabbix-server; then
-            log_info "Zabbix Server fonctionne après réparation."
-        else
-            log_error "La réparation automatique de Zabbix Server a échoué."
-        fi
+        log_error "La réparation automatique de Zabbix Server a échoué."
     fi
 
     if [ ${#ERRORS[@]} -gt 0 ]; then
-        log_error "Erreurs restantes après tentative de réparation :"
+        log_error "Erreurs restantes :"
         for err in "${ERRORS[@]}"; do
             log_error "$err"
         done
     else
-        log_info "Aucune erreur restante après réparation."
+        log_info "Aucune erreur restante."
     fi
 }
 
 # ------------------------------------------------------------------------------
-#                       VARIABLES DE CONFIGURATION
+#                   SAISIE INTERACTIVE DES IDENTIFIANTS
 # ------------------------------------------------------------------------------
-MYSQL_ROOT_PASSWORD="root123"
-ZABBIX_DB="zabbix"
-ZABBIX_DB_USER="zabbix"
-ZABBIX_DB_PASS="zabbix_pass"
+# Valeurs par défaut
+DEFAULT_MYSQL_ROOT="root123"
+DEFAULT_ZABBIX_DB="zabbix"
+DEFAULT_ZABBIX_USER="zabbix"
+DEFAULT_ZABBIX_PASS="zabbix_pass"
+
+# Demande interactive (appuyez sur Entrée pour conserver la valeur par défaut)
+read -p "Saisissez le mot de passe root MySQL [${DEFAULT_MYSQL_ROOT}]: " input
+MYSQL_ROOT_PASSWORD=${input:-$DEFAULT_MYSQL_ROOT}
+
+read -p "Saisissez le nom de la base Zabbix [${DEFAULT_ZABBIX_DB}]: " input
+ZABBIX_DB=${input:-$DEFAULT_ZABBIX_DB}
+
+read -p "Saisissez l'utilisateur de la base Zabbix [${DEFAULT_ZABBIX_USER}]: " input
+ZABBIX_DB_USER=${input:-$DEFAULT_ZABBIX_USER}
+
+read -p "Saisissez le mot de passe de l'utilisateur Zabbix [${DEFAULT_ZABBIX_PASS}]: " input
+ZABBIX_DB_PASS=${input:-$DEFAULT_ZABBIX_PASS}
+
+# Autres identifiants (vous pouvez modifier ou ajouter d'autres prompts si nécessaire)
+read -p "Saisissez l'utilisateur Grafana [admin]: " input
+GRAFANA_ADMIN_USER=${input:-admin}
+read -p "Saisissez le mot de passe Grafana [admin123]: " input
+GRAFANA_ADMIN_PASS=${input:-admin123}
+
+# Zone de configuration fixe
 ZABBIX_SERVER_TIMEZONE="Europe/Paris"
-
-GRAFANA_ADMIN_USER="admin"
-GRAFANA_ADMIN_PASS="admin123"
-
 ENABLE_ELASTIC_SECURITY=true
 ES_PASSWORDS_FILE="/tmp/es_passwords.txt"
 KIBANA_ELASTIC_USER="elastic"
@@ -86,7 +101,7 @@ KIBANA_ELASTIC_USER="elastic"
 KEYRING_DIR="/usr/share/keyrings"
 
 # ------------------------------------------------------------------------------
-#                       FONCTIONS UTILES
+#                   FONCTIONS UTILES
 # ------------------------------------------------------------------------------
 ask_user() {
     local input
@@ -102,10 +117,10 @@ already_installed() {
 }
 
 # ------------------------------------------------------------------------------
-#                IMPORT DES CLÉS GPG & CONFIGURATION DES DÉPÔTS
+#            IMPORT DES CLÉS GPG & CONFIGURATION DES DÉPÔTS
 # ------------------------------------------------------------------------------
 import_grafana_key() {
-    log_info "Import de la clé GPG Grafana et configuration du dépôt pour Debian 12..."
+    log_info "Import de la clé GPG Grafana et configuration du dépôt..."
     mkdir -p "$KEYRING_DIR"
     run_cmd curl -fsSL https://packages.grafana.com/gpg.key \
          | gpg --dearmor \
@@ -115,7 +130,7 @@ deb [signed-by=${KEYRING_DIR}/grafana-archive-keyring.gpg] https://packages.graf
 EOF
 }
 import_elastic_key() {
-    log_info "Import de la clé GPG Elastic et configuration du dépôt pour Debian 12..."
+    log_info "Import de la clé GPG Elastic et configuration du dépôt..."
     mkdir -p "$KEYRING_DIR"
     run_cmd curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch \
          | gpg --dearmor \
@@ -126,7 +141,7 @@ EOF
 }
 import_zabbix_repo() {
     log_info "Installation du repository Zabbix 7.0 pour Debian 12..."
-    # Téléchargement du paquet release pour Zabbix 7.0.
+    # Ici, on utilise une version proposée (vérifiez que l'URL est valide sur repo.zabbix.com)
     run_cmd wget -4 -O /tmp/zabbix-release.deb \
       https://repo.zabbix.com/zabbix/7.0/debian/pool/main/z/zabbix-release/zabbix-release_7.0-1+debian12_all.deb
     if [ $? -eq 0 ]; then
@@ -140,10 +155,10 @@ import_zabbix_repo() {
 #                         INSTALLATION DE BASE
 # ------------------------------------------------------------------------------
 install_base_packages() {
-    log_info "=== Import des clés GPG & configuration des dépôts ==="
+    log_info "=== Import des clés et configuration des dépôts ==="
     run_cmd apt-get install -y gnupg curl wget lsb-release apt-transport-https software-properties-common
 
-    # Retirer d'éventuelles références à Bullseye
+    # Suppression d'anciennes références (Bullseye)
     if [ -f /etc/apt/sources.list ]; then
         sed -i '/bullseye-security/d' /etc/apt/sources.list
         sed -i '/bullseye/d' /etc/apt/sources.list
@@ -167,7 +182,7 @@ install_base_packages() {
     log_info "=== Installation des paquets de base ==="
     run_cmd apt-get upgrade -y
     run_cmd apt-get install -y python3 python3-pip python3-venv iptables ufw mariadb-server
-    log_info "Paquets de base installés ou mis à jour avec succès."
+    log_info "Paquets de base installés ou mis à jour."
 }
 
 # ------------------------------------------------------------------------------
@@ -176,7 +191,7 @@ install_base_packages() {
 configure_mariadb() {
     log_info "Configuration du mot de passe root MySQL..."
     if ! mysql -u root -p"${MYSQL_ROOT_PASSWORD}" -e "SELECT 1" &>/dev/null; then
-        record_error "Impossible de se connecter à MySQL en tant que root (mot de passe = '${MYSQL_ROOT_PASSWORD}')."
+        record_error "Impossible de se connecter à MySQL en tant que root."
     fi
     run_cmd mysql -u root -p"${MYSQL_ROOT_PASSWORD}" <<EOF
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${MYSQL_ROOT_PASSWORD}';
@@ -193,39 +208,54 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-#              INSTALLATION DU SERVEUR ZABBIX (sans agent)
+#             INSTALLATION DU SERVEUR ZABBIX (sans agent)
 # ------------------------------------------------------------------------------
 install_zabbix_server() {
     if ask_user "Installer Zabbix Server (sans agent) ?"; then
         if ! already_installed zabbix-server-mysql; then
             log_info "Installation des paquets zabbix-server-mysql et zabbix-frontend-php..."
             run_cmd apt-get update
-            # On n'inclut pas zabbix-agent, zabbix-apache-conf ni zabbix-sql-scripts
             run_cmd apt-get install -y zabbix-server-mysql zabbix-frontend-php
         fi
 
-        # Tentative d'import du schéma (vérifiez si un fichier existe dans /usr/share/doc/zabbix*)
+        # Tentative d'import du schéma
         local schema_file
-        schema_file="$(find /usr/share/doc/zabbix* -type f -name '*create.sql.gz' 2>/dev/null | head -n1)"
+        schema_file=$(find /usr/share/doc/zabbix* -type f -name '*create.sql.gz' 2>/dev/null | head -n1)
         if [ -n "$schema_file" ]; then
             log_info "Import du schéma Zabbix depuis : $schema_file"
             zcat "$schema_file" | mysql -u "${ZABBIX_DB_USER}" -p"${ZABBIX_DB_PASS}" "${ZABBIX_DB}"
         else
-            record_error "Aucun fichier de schéma Zabbix trouvé. Veuillez importer le schéma manuellement."
+            record_error "Aucun fichier de schéma Zabbix trouvé. Vous devrez l'importer manuellement."
         fi
 
-        # Configuration Apache (si le fichier existe)
-        if [ -f /etc/apache2/conf-available/zabbix.conf ]; then
+        # Vérification et création du fichier Apache pour Zabbix
+        if [ ! -f /etc/apache2/conf-available/zabbix.conf ]; then
+            if ask_user "Le fichier /etc/apache2/conf-available/zabbix.conf est introuvable. Voulez-vous en créer un fichier de configuration minimal pour Apache ?"; then
+                cat <<EOF >/etc/apache2/conf-available/zabbix.conf
+Alias /zabbix /usr/share/zabbix
+
+<Directory "/usr/share/zabbix">
+    Options FollowSymLinks
+    AllowOverride None
+    Require all granted
+</Directory>
+
+php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}
+EOF
+                log_info "Fichier /etc/apache2/conf-available/zabbix.conf créé."
+            else
+                record_error "Le fichier de configuration Apache pour Zabbix n'existe pas."
+            fi
+        else
+            # Mise à jour de la directive date.timezone
             if ! grep -q "php_value date.timezone" /etc/apache2/conf-available/zabbix.conf; then
                 echo "php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}" >>/etc/apache2/conf-available/zabbix.conf
             else
                 sed -i "s|php_value date.timezone .*|php_value date.timezone ${ZABBIX_SERVER_TIMEZONE}|" /etc/apache2/conf-available/zabbix.conf
             fi
-        else
-            record_error "Le fichier /etc/apache2/conf-available/zabbix.conf est introuvable. Veuillez créer ou adapter la configuration Apache."
         fi
 
-        # Mise à jour de la configuration du serveur Zabbix (si le fichier existe)
+        # Configuration du fichier de configuration du serveur Zabbix
         if [ -f /etc/zabbix/zabbix_server.conf ]; then
             sed -i "s|^# DBPassword=.*|DBPassword=${ZABBIX_DB_PASS}|" /etc/zabbix/zabbix_server.conf
             sed -i "s|^# DBUser=.*|DBUser=${ZABBIX_DB_USER}|" /etc/zabbix/zabbix_server.conf
@@ -237,7 +267,7 @@ install_zabbix_server() {
             record_error "Le fichier /etc/zabbix/zabbix_server.conf est introuvable. Veuillez le créer manuellement."
         fi
 
-        # Création du répertoire /run/zabbix si l'utilisateur zabbix existe
+        # Création du répertoire de run si l'utilisateur zabbix existe
         if id zabbix &>/dev/null; then
             mkdir -p /run/zabbix
             chown -R zabbix:zabbix /run/zabbix
@@ -246,8 +276,17 @@ install_zabbix_server() {
         fi
 
         run_cmd systemctl daemon-reload
-        run_cmd systemctl enable zabbix-server apache2
-        run_cmd systemctl restart zabbix-server apache2
+        # Activation séparée pour éviter de combiner apache2
+        run_cmd systemctl enable zabbix-server
+        run_cmd systemctl restart zabbix-server
+
+        # Tenter d'activer Apache si installé
+        if already_installed apache2; then
+            run_cmd systemctl enable apache2
+            run_cmd systemctl restart apache2
+        else
+            log_info "Le paquet Apache2 n'est pas installé. Vous devez l'installer manuellement pour accéder au frontend Zabbix."
+        fi
 
         sleep 3
         if systemctl is-active --quiet zabbix-server; then
@@ -360,7 +399,7 @@ EOF
 }
 
 # ------------------------------------------------------------------------------
-#                         CONFIGURATION DU FIREWALL (UFW)
+#                     CONFIGURATION DU FIREWALL (UFW)
 # ------------------------------------------------------------------------------
 configure_firewall() {
     if ask_user "Configurer le firewall UFW avec des règles de base ?"; then
@@ -426,7 +465,7 @@ install_vulners() {
 }
 
 # ------------------------------------------------------------------------------
-#                             DÉTECTION D'ADRESSES IP
+#                         DÉTECTION D'ADRESSES IP
 # ------------------------------------------------------------------------------
 detect_ip() {
     log_info "Adresses IP détectées :"
