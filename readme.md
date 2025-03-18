@@ -26,6 +26,8 @@ cd HACKATHON_SDV_25
 chmod +x install_monitoring.sh
 sudo ./install_monitoring.sh
 ```
+![ezgif-43d65f415083fb](https://github.com/user-attachments/assets/46155943-4520-49be-ae44-c8f31a753aa3)
+
 
 ### 🖥 **Installation sur Windows**
 Pour installer l’agent Zabbix et Filebeat sur Windows, télécharger et exécuter les scripts `.ps1` en mode administrateur :
@@ -53,6 +55,11 @@ Set-ExecutionPolicy Unrestricted -Scope Process
 | Script | Description |
 |--------|------------|
 | `manage_system.sh` | Script interactif pour gérer et surveiller les services (Zabbix, ELK, Grafana, Fail2Ban, Suricata) |
+![ezgif-4682e03d6fc398](https://github.com/user-attachments/assets/ab684baa-f2fd-4a47-8da6-bb68443bc044)
+
+
+![111111](https://github.com/user-attachments/assets/c9965619-8964-4cdd-84ef-9eae8ab8c1e1)
+
 
 ---
 
