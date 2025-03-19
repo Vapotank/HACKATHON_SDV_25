@@ -1,8 +1,6 @@
-Voici une version complète du fichier **README.md** qui détaille l'ensemble des services installés, les fonctionnalités de chaque script et fournit des instructions claires pour le déploiement et la réutilisation sur d'autres infrastructures.
-
 ---
-
-# 📌 Projet de Monitoring & Gestion de Serveurs
+## 🛠️ Mise à jour en cours
+# 📌 Projet de Monitoring & Gestion de Serveurs 
 
 Ce projet propose une solution complète pour déployer et gérer un environnement de surveillance et de sécurité sur des serveurs. Il regroupe plusieurs scripts permettant d'installer et de configurer des services de monitoring, de gestion et d'audit.
 
