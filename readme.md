@@ -234,7 +234,7 @@ Après chaque déploiement, procédez aux vérifications suivantes :
 ## 📌 Auteurs & Contributions
 
 - **Créateur du Projet :**  
-  *Projet Hackathon SDV 2025*  
+  *VAPOTANK Projet Hackathon SDV 2025*  
 - **Contributions & Support :**  
   Pour signaler des problèmes, ouvrir une issue ou contacter l'équipe DevOps via le dépôt du projet.
 
