@@ -1,127 +1,248 @@
-Voici un **README.md** mis à jour pour tous les scripts inclus dans ton projet :
+Voici une version complète du fichier **README.md** qui détaille l'ensemble des services installés, les fonctionnalités de chaque script et fournit des instructions claires pour le déploiement et la réutilisation sur d'autres infrastructures.
 
 ---
 
-# 🛠️ Projet de Monitoring & Gestion des Services
+# 📌 Projet de Monitoring & Gestion de Serveurs
 
-## 📌 Description
-Ce projet permet l’installation, la configuration et la gestion des outils de monitoring sur un serveur Debian/Ubuntu et Windows. Il intègre :
-- **Zabbix Server & Agent** 🖥️
-- **Grafana** 📊
-- **ELK Stack (Elasticsearch, Logstash, Kibana)** 📡
-- **Suricata IDS** 🔍
-- **Fail2Ban** 🚧
-- **Lynis & Vulners pour l’audit de sécurité et l’analyse des vulnérabilités** 🔒
-- **Un script interactif de gestion des services et des audits** ⚙️
+Ce projet propose une solution complète pour déployer et gérer un environnement de surveillance et de sécurité sur des serveurs. Il regroupe plusieurs scripts permettant d'installer et de configurer des services de monitoring, de gestion et d'audit.
 
 ---
 
-## 🚀 Installation
+## 🛠️ Services Installés et Fonctionnalités
 
-### 🐧 **Installation sur Linux (Debian/Ubuntu)**
-Cloner le dépôt et exécuter le script d’installation :
-```bash
-git clone https://github.com/Vapotank/HACKATHON_SDV_25
-cd HACKATHON_SDV_25
-chmod +x install_monitoring.sh
-sudo ./install_monitoring.sh
-```
-![ezgif-43d65f415083fb](https://github.com/user-attachments/assets/46155943-4520-49be-ae44-c8f31a753aa3)
+### 1. **Zabbix (Server, Frontend et Agent)**
+- **Fonctionnalité :** Supervision complète du réseau et des serveurs.
+- **Installation :**
+  - **Script concerné :** `install_monitoring.sh` (installation de Zabbix Server, Frontend, et Agent sur Debian)
+  - **Configuration :**
+    - Création d'une base de données Zabbix sur MariaDB.
+    - Paramétrage des fichiers de configuration pour le serveur et l'agent.
+    - Accès web via l'URL `http://<IP>/zabbix` (identifiants par défaut : Admin / `zabbix`).
 
+### 2. **Grafana**
+- **Fonctionnalité :** Visualisation des données de monitoring avec des dashboards interactifs.
+- **Installation :**
+  - **Script concerné :** `install_monitoring.sh`
+  - **Configuration :**
+    - Installation via dépôt Grafana.
+    - Paramétrage des identifiants d'administration (par défaut : `admin` / `admin123`).
+    - Accès via `http://<IP>:3000`.
 
-### 🖥 **Installation sur Windows**
-Pour installer l’agent Zabbix et Filebeat sur Windows, télécharger et exécuter les scripts `.ps1` en mode administrateur :
+### 3. **ELK Stack (Elasticsearch, Logstash, Kibana)**
+- **Fonctionnalité :** Centralisation, recherche et visualisation des logs.
+- **Installation :**
+  - **Script concerné :** `install_monitoring.sh`
+  - **Configuration :**
+    - Installation d'Elasticsearch, Logstash et Kibana.
+    - Option de sécurité activée pour Elasticsearch (les mots de passe générés sont stockés dans un fichier temporaire).
+    - Accès à Kibana via `http://<IP>:5601`.
 
-```powershell
-Set-ExecutionPolicy Unrestricted -Scope Process
-.\Install_ZabbixAgent.ps1
-.\Install_Filebeat.ps1
-```
+### 4. **Filebeat (Agent ELK)**
+- **Fonctionnalité :** Collecte et envoi des logs vers Elasticsearch ou Logstash.
+- **Installation :**
+  - **Script concerné :**
+    - Pour les serveurs Linux/Debian : `elk_agent_install.sh` ou via le script interactif d’installation d'agents.
+    - Pour Windows : `Install_Filebeat.ps1`
+  - **Configuration :**
+    - Fichier `/etc/filebeat/filebeat.yml` (ou équivalent pour Windows) configuré pour pointer vers le serveur central.
+    - Authentification pour Elasticsearch (par défaut : utilisateur `elastic` / mot de passe `FtGlIjDf9TBUxF5hjbZa`).
+
+### 5. **Zabbix Agent**
+- **Fonctionnalité :** Collecte des métriques sur les serveurs clients pour la supervision par Zabbix.
+- **Installation :**
+  - **Script concerné :**
+    - Pour Debian : `zabbix_agent_install.sh` ou via le script interactif d’installation d'agents.
+    - Pour Windows : `Install_ZabbixAgent.ps1`
+  - **Configuration :**
+    - Fichier `/etc/zabbix/zabbix_agentd.conf` mis à jour pour pointer vers le serveur Zabbix (par défaut `192.168.1.41` ou modifiable).
+
+### 6. **Suricata (IDS/IPS)**
+- **Fonctionnalité :** Détection d'intrusions et protection contre les attaques réseau.
+- **Installation :**
+  - **Script concerné :** `install_monitoring.sh`
+  - **Configuration :** Optionnelle, avec intégration à ELK via Filebeat.
+
+### 7. **Fail2ban**
+- **Fonctionnalité :** Protection contre les attaques par force brute (notamment SSH).
+- **Installation :**
+  - **Script concerné :** `install_monitoring.sh`
+  - **Configuration :** Paramètres de blocage, délai et nombre de tentatives définis.
+
+### 8. **Lynis et Vulners**
+- **Fonctionnalité :** Audit de sécurité et détection des vulnérabilités.
+- **Installation :**
+  - **Script concerné :** `install_monitoring.sh` pour Lynis et Vulners.
+  - **Configuration :** Installation d'un environnement virtuel Python pour Vulners.
+
+### 9. **Script de Gestion & Audit – `manage_system.sh`**
+- **Fonctionnalité :** 
+  - Audit interactif des logs locaux et distants.
+  - Exécution d'audits de sécurité via Lynis.
+  - Analyse des vulnérabilités via Vulners.
+  - Affichage d'un historique des audits.
+- **Utilisation :**
+  - Exécution en mode interactif, avec un menu en ASCII pour la navigation.
+  - Permet de choisir entre différentes actions (vérification de logs, audits, etc.).
 
 ---
 
-## 📂 Contenu des Scripts
+## 🚀 Déploiement et Instructions d'Installation
 
-### 🔹 **Installation & Configuration**
-| Script | Description |
-|--------|------------|
-| `install_monitoring.sh` | Installation complète de Zabbix, ELK, Grafana, Suricata et autres outils sur Debian/Ubuntu |
-| `install_zabbix_agent.sh` | Installation et configuration de l’agent Zabbix sur une machine cliente Linux |
-| `install_elk_agent.sh` | Installation de Filebeat pour envoyer les logs système à ELK |
-| `Install_ZabbixAgent.ps1` | Installation de l’agent Zabbix sur Windows |
-| `Install_Filebeat.ps1` | Installation de Filebeat sur Windows |
-
-### 🔹 **Gestion & Monitoring**
-| Script | Description |
-|--------|------------|
-| `manage_system.sh` | Script interactif pour gérer et surveiller les services (Zabbix, ELK, Grafana, Fail2Ban, Suricata) |
-
-
-![ezgif-4682e03d6fc398](https://github.com/user-attachments/assets/ab684baa-f2fd-4a47-8da6-bb68443bc044)
-![111111](https://github.com/user-attachments/assets/c9965619-8964-4cdd-84ef-9eae8ab8c1e1)
-
-
----
-
-## 🖥️ **Fonctionnalités du Script de Management (`manage_system.sh`)**
-Le script permet de :
-- **🔍 Vérifier les logs système (local & distant)**
-- **🛡 Auditer la sécurité avec Lynis (local & distant)**
-- **📊 Vérifier les vulnérabilités avec Vulners (local & distant)**
-- **📂 Visualiser les précédents audits**
-- **⚙️ Gérer les services (Zabbix, ELK, Suricata, etc.)**
-- **🖥️ Exécuter les audits et analyses CVE sur des serveurs distants !**
-
-### 📜 **Utilisation**
-Exécuter le script :
-```bash
-chmod +x manage_system.sh
-./manage_system.sh
-```
-Le menu interactif vous guidera à travers les options.
-
----
-
-## 🔧 **Dépannage**
-### **1️⃣ Accès à Kibana impossible ?**
-- Vérifier si le service tourne :
+### 1. **Pré-requis**
+- Serveur sous **Debian 12 (Bookworm)** ou Windows (pour les agents spécifiques).
+- Accès root (ou via `sudo`).
+- Connexion réseau entre le serveur central et les machines clientes.
+- Pour les outils Python (Vulners) :
   ```bash
-  systemctl status kibana
+  sudo apt install python3 python3-pip -y
+  python3 -m venv /opt/vulners-venv
+  source /opt/vulners-venv/bin/activate
+  pip install --upgrade pip vulners
+  deactivate
   ```
-- Modifier la configuration pour autoriser l’accès :
+
+### 2. **Installation sur le Serveur Central**
+1. **Exécuter le script d'installation complet**  
+   Utilisez le script `install_monitoring.sh` pour installer et configurer :
+   - Zabbix (Server, Frontend, Agent)
+   - Grafana
+   - ELK Stack (Elasticsearch, Logstash, Kibana)
+   - Suricata, Fail2ban, Lynis et Vulners  
+   Exemple :
+   ```bash
+   sudo chmod +x install_monitoring.sh
+   sudo ./install_monitoring.sh
+   ```
+2. **Vérification des services**  
+   Une fois l'installation terminée, vérifiez le statut des services avec :
+   ```bash
+   sudo systemctl status elasticsearch kibana filebeat zabbix-agent zabbix-server
+   ```
+
+### 3. **Installation et Configuration des Agents sur les Machines Clients**
+- **Linux/Debian Clients :**
+  - Vous pouvez déployer les agents Filebeat ou Zabbix via le script interactif d'installation d'agents (`install_agent_noninteractive.sh`).
+  - Exécutez le script depuis le serveur de déploiement :
+    ```bash
+    sudo chmod +x install_agent_noninteractive.sh
+    sudo ./install_agent_noninteractive.sh
+    ```
+  - Suivez le menu interactif pour saisir l'IP cible, choisir le système (Debian/Ubuntu) et le type d'agent (Filebeat ou Zabbix).  
+  - **Filebeat** sera automatiquement configuré pour envoyer les logs (ainsi qu'une configuration minimale d'input) vers Elasticsearch sur le serveur central avec authentification.
+  
+- **Windows Clients :**
+  - Utilisez les scripts PowerShell fournis (`Install_Filebeat.ps1` et `Install_ZabbixAgent.ps1`).
+  - Le script interactif affiche les commandes à copier-coller dans une session PowerShell en mode administrateur.  
+  - Assurez-vous que le téléchargement depuis votre domaine est accessible pour récupérer les scripts.
+
+### 4. **Instructions pour le Redeploiement sur d'autres Infrastructures**
+Pour adapter le déploiement à une nouvelle infrastructure :
+- **Modifier les paramètres suivants** dans les scripts (souvent en haut des fichiers) :
+  - **SERVER_IP** : Adresse IP du serveur central de monitoring (par exemple, dans `install_monitoring.sh` et `install_agent_noninteractive.sh`).
+  - **Identifiants et ports** : Pour Elasticsearch, Grafana, Zabbix et autres services.  
+  - **Dépôts et clés GPG** : Vérifiez que les URL et clés pour les dépôts sont toujours valides pour la nouvelle infrastructure.
+- **Vérifier les prérequis système** (versions de Debian, accès réseau, etc.).
+- **Adapter les chemins et configurations spécifiques** (ex. chemins de logs ou paramètres personnalisés dans les fichiers de configuration).
+- **Tester chaque service individuellement** après déploiement pour s'assurer que la communication entre les agents et le serveur central est opérationnelle.
+
+---
+
+## 🔎 Vérification et Diagnostic
+
+Après chaque déploiement, procédez aux vérifications suivantes :
+
+1. **Test de Configuration et de Sortie pour Filebeat**  
+   ```bash
+   sudo filebeat test config
+   sudo filebeat test output
+   ```
+2. **Vérification des Services**  
+   Utilisez `systemctl status` pour chaque service :
+   ```bash
+   sudo systemctl status filebeat
+   sudo systemctl status elasticsearch
+   sudo systemctl status kibana
+   sudo systemctl status zabbix-server
+   sudo systemctl status zabbix-agent
+   ```
+3. **Consultation des Logs**  
+   Pour Filebeat :
+   ```bash
+   sudo journalctl -u filebeat -f
+   ```
+   Pour Elasticsearch, Zabbix et autres, consultez les logs dans `/var/log/`.
+
+---
+
+## 📂 Liste des Scripts Disponibles
+
+### 🔹 `install_monitoring.sh`
+- **Description :**  
+  Script complet pour installer et configurer Zabbix, Grafana, ELK (Elasticsearch, Logstash, Kibana), Suricata, Fail2ban, Lynis et Vulners sur un serveur Debian.
+- **Utilisation :**
   ```bash
-  sudo nano /etc/kibana/kibana.yml
-  ```
-  Ajouter/modifier :
-  ```yaml
-  server.host: "0.0.0.0"
+  sudo chmod +x install_monitoring.sh
+  sudo ./install_monitoring.sh
   ```
 
-### **2️⃣ Zabbix ne détecte pas l’agent**
-- Vérifier la connexion :
+### 🔹 `manage_system.sh`
+- **Description :**  
+  Script interactif pour la gestion et l’audit du système :
+  - Vérification des logs locaux et distants
+  - Exécution d'audits de sécurité avec Lynis
+  - Analyse de vulnérabilités avec Vulners
+  - Affichage des audits précédents
+- **Utilisation :**
   ```bash
-  systemctl status zabbix-agent
+  sudo chmod +x manage_system.sh
+  sudo ./manage_system.sh
   ```
 
-### **3️⃣ Grafana ne peut pas se connecter à Zabbix**
-- Vérifier l’URL de l’API dans Grafana : `http://<IP>/zabbix/api_jsonrpc.php`
+### 🔹 `elk_agent_install.sh` et `zabbix_agent_install.sh`
+- **Description :**  
+  Scripts pour installer et configurer respectivement Filebeat et l'agent Zabbix sur une machine Debian.
+- **Utilisation :**
+  ```bash
+  sudo chmod +x elk_agent_install.sh
+  sudo ./elk_agent_install.sh
+
+  sudo chmod +x zabbix_agent_install.sh
+  sudo ./zabbix_agent_install.sh
+  ```
+
+### 🔹 `Install_Filebeat.ps1` et `Install_ZabbixAgent.ps1`
+- **Description :**  
+  Scripts PowerShell pour installer et configurer Filebeat et l'agent Zabbix sur Windows.
+- **Utilisation :**  
+  Exécutez-les dans une session PowerShell en mode administrateur :
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File Install_Filebeat.ps1
+  powershell -ExecutionPolicy Bypass -File Install_ZabbixAgent.ps1
+  ```
+
+### 🔹 `install_agent_noninteractive.sh`
+- **Description :**  
+  Script interactif pour installer à distance Filebeat ou l’agent Zabbix sur une machine cible (Debian ou Windows).  
+  Pour Debian, il se connecte via SSH, installe le paquet et recrée la configuration de manière automatique (incluant les inputs pour Filebeat et l'authentification pour Elasticsearch).  
+  Pour Windows, il affiche les commandes à copier dans une session PowerShell.
+- **Utilisation :**
+  ```bash
+  sudo chmod +x install_agent_noninteractive.sh
+  sudo ./install_agent_noninteractive.sh
+  ```
 
 ---
 
-## 👨‍💻 **Contributeurs**
-Projet développé par **VAPOTANK** et l’équipe Hackathon SDV 25 🚀
+## 📌 Auteurs & Contributions
+
+- **Créateur du Projet :**  
+  *Projet Hackathon SDV 2025*  
+- **Contributions & Support :**  
+  Pour signaler des problèmes, ouvrir une issue ou contacter l'équipe DevOps via le dépôt du projet.
 
 ---
 
-## 🔗 **Liens Utiles**
-- 📘 [Zabbix Documentation](https://www.zabbix.com/documentation)
-- 📘 [Grafana Documentation](https://grafana.com/docs/)
-- 📘 [Elastic Stack Documentation](https://www.elastic.co/guide/)
+## ✅ Dernière Mise à Jour
+**19 Mars 2025**
 
 ---
-
-## 📢 **Contact**
-Pour toute question ou amélioration, ouvrez une **issue** sur GitHub ! 🚀
-
----
-
