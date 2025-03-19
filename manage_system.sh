@@ -60,14 +60,14 @@ check_logs_local() {
 check_logs_remote() {
     read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
     echo "📌 Vérification des logs sur $SERVER_IP..."
-    ssh root@$SERVER_IP "journalctl -n 50 --no-pager" > "$LOG_DIR/remote_logs_$SERVER_IP.txt"
+    ssh root@"$SERVER_IP" "journalctl -n 50 --no-pager" > "$LOG_DIR/remote_logs_$SERVER_IP.txt"
     cat "$LOG_DIR/remote_logs_$SERVER_IP.txt"
     echo "✅ Logs enregistrés dans $LOG_DIR/remote_logs_$SERVER_IP.txt"
     read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
 }
 
 # ==========================================================
-# 🔍 Lancer un audit de sécurité avec Lynis
+# 🔍 Lancer un audit de sécurité avec Lynis (local)
 # ==========================================================
 run_lynis_audit() {
     echo "📌 Exécution d'un audit de sécurité avec Lynis..."
@@ -78,19 +78,41 @@ run_lynis_audit() {
 }
 
 # ==========================================================
-# 🔍 Lancer un audit de sécurité sur un serveur distant
+# 🔍 Lancer un audit de sécurité (Lynis - distant)
 # ==========================================================
 run_lynis_audit_remote() {
     read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
     echo "📌 Exécution d'un audit de sécurité sur $SERVER_IP..."
-    ssh root@$SERVER_IP "lynis audit system" > "$LOG_DIR/lynis_audit_$SERVER_IP.txt"
+
+    ssh root@"$SERVER_IP" bash -s <<'ENDSSH'
+echo "⏳ Vérification/installation de Lynis, veuillez patienter..."
+
+# Vérifier si lynis est déjà installé
+if ! command -v lynis &>/dev/null; then
+  apt update -y
+  apt install -y lynis
+fi
+
+# Lancer l'audit Lynis et stocker le résultat
+echo "⏳ Lancement de l'audit Lynis..."
+lynis audit system > /var/log/lynis_audit_remote.txt
+ENDSSH
+
+    # Rapatrier le fichier localement
+    ssh root@"$SERVER_IP" "cat /var/log/lynis_audit_remote.txt" > "$LOG_DIR/lynis_audit_$SERVER_IP.txt"
+
+    # Afficher le résultat
     cat "$LOG_DIR/lynis_audit_$SERVER_IP.txt"
-    echo "✅ Audit enregistré dans $LOG_DIR/lynis_audit_$SERVER_IP.txt"
+
+    echo "✅ Audit enregistré sur le serveur distant dans /var/log/lynis_audit_remote.txt"
+    echo "✅ Copie locale : $LOG_DIR/lynis_audit_$SERVER_IP.txt"
     read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
 }
 
+
+
 # ==========================================================
-# 🛡️ Vérification des vulnérabilités avec Vulners
+# 🛡️ Vérification des vulnérabilités avec Vulners (local)
 # ==========================================================
 check_vulners_local() {
     echo "📌 Vérification des vulnérabilités avec Vulners..."
@@ -109,7 +131,7 @@ packages_list = [{\"name\": pkg.split()[0], \"version\": pkg.split()[1]} for pkg
 
 # Exécution de l'audit Vulners
 result = v.software_audit(os='Debian', version=os_version, packages=packages_list)
-print(json.dumps(result, indent=4))  # Affichage formaté JSON
+print(json.dumps(result, indent=4))
 " > "$LOG_DIR/vulners_audit.txt"
     deactivate
 
@@ -118,33 +140,53 @@ print(json.dumps(result, indent=4))  # Affichage formaté JSON
     read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
 }
 
-
-
 # ==========================================================
 # 🛡️ Vérification des vulnérabilités sur un serveur distant
+#  (Option B : installer le venv + vulners si non existant)
 # ==========================================================
 check_vulners_remote() {
     read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
     echo "📌 Vérification des vulnérabilités sur $SERVER_IP..."
-    ssh root@$SERVER_IP "source /opt/vulners-venv/bin/activate && python3 -c '
+
+    ssh root@"$SERVER_IP" bash -s <<'ENDSSH'
+# Vérifier si le venv /opt/vulners-venv existe déjà
+if [ ! -d /opt/vulners-venv ]; then
+  apt update -y
+  apt install -y python3 python3-pip python3-venv
+  python3 -m venv /opt/vulners-venv
+  source /opt/vulners-venv/bin/activate
+  pip install --upgrade pip
+  pip install vulners
+  deactivate
+fi
+
+# Activer le venv et lancer l'audit
+source /opt/vulners-venv/bin/activate
+python3 -c "
 import vulners, subprocess, json
 
-v = vulners.VulnersApi(api_key=\"$VULNERS_API_KEY\")
+v = vulners.VulnersApi(api_key='DIGNQ4NM6A55C5NZ0L6LTZCARDNAEWI25QY4VM3OB5AZPWDTW65ZVTY3BVBBJ2TF')
 
-os_version = subprocess.getoutput(\"lsb_release -rs\")
-
-raw_packages = subprocess.getoutput(\"dpkg-query -W -f=\\\"${Package} ${Version}\\\\n\\\"\").splitlines()
+os_version = subprocess.getoutput('lsb_release -rs')
+raw_packages = subprocess.getoutput('dpkg-query -W -f=\\\"${Package} ${Version}\\\\n\\\"').splitlines()
 packages_list = [{\"name\": pkg.split()[0], \"version\": pkg.split()[1]} for pkg in raw_packages if len(pkg.split()) == 2]
 
 result = v.software_audit(os=\"Debian\", version=os_version, packages=packages_list)
 print(json.dumps(result, indent=4))
-' > /var/log/vulners_audit_$SERVER_IP.txt && deactivate"
-    
-    ssh root@$SERVER_IP "cat /var/log/vulners_audit_$SERVER_IP.txt"
-    echo "✅ Audit enregistré sur le serveur distant dans /var/log/vulners_audit_$SERVER_IP.txt"
-    read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
-}
+" > /var/log/vulners_audit_remote.txt
+deactivate
+ENDSSH
 
+    # Récupérer le fichier généré sur la machine distante vers la machine locale
+    ssh root@"$SERVER_IP" "cat /var/log/vulners_audit_remote.txt" > "$LOG_DIR/vulners_audit_$SERVER_IP.txt"
+
+    # Afficher le résultat localement
+    cat "$LOG_DIR/vulners_audit_$SERVER_IP.txt"
+
+    echo "✅ Audit enregistré sur le serveur distant dans /var/log/vulners_audit_remote.txt"
+    echo "✅ Copie locale : $LOG_DIR/vulners_audit_$SERVER_IP.txt"
+    read -p \"🔄 Appuyez sur Entrée pour revenir au menu...\"
+}
 
 
 # ==========================================================
