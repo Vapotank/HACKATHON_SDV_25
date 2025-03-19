@@ -90,18 +90,29 @@ check_vulners_local() {
     echo "📌 Vérification des vulnérabilités avec Vulners..."
     source /opt/vulners-venv/bin/activate
     python3 -c "
-import vulners, subprocess
+import vulners, subprocess, json
+
 v = vulners.VulnersApi(api_key='$VULNERS_API_KEY')
+
+# Récupération de la version de l'OS
 os_version = subprocess.getoutput('lsb_release -rs')
-packages = subprocess.getoutput('dpkg-query -W -f=\"${Package} ${Version}\\n\"').splitlines()
-result = v.software_audit(os='Debian', version=os_version, packages=packages)
-print(result)
+
+# Récupération des paquets installés et formatage en liste de dictionnaires
+raw_packages = subprocess.getoutput('dpkg-query -W -f=\"${Package} ${Version}\\n\"').splitlines()
+packages_list = [{\"name\": pkg.split()[0], \"version\": pkg.split()[1]} for pkg in raw_packages if len(pkg.split()) == 2]
+
+# Exécution de l'audit Vulners
+result = v.software_audit(os='Debian', version=os_version, packages=packages_list)
+print(json.dumps(result, indent=4))  # Affichage formaté JSON
 " > "$LOG_DIR/vulners_audit.txt"
     deactivate
+
     cat "$LOG_DIR/vulners_audit.txt"
     echo "✅ Audit enregistré dans $LOG_DIR/vulners_audit.txt"
     read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
 }
+
+
 
 # ==========================================================
 # 🛡️ Vérification des vulnérabilités sur un serveur distant
@@ -110,17 +121,25 @@ check_vulners_remote() {
     read -p "🖥️  Adresse IP du serveur distant : " SERVER_IP
     echo "📌 Vérification des vulnérabilités sur $SERVER_IP..."
     ssh root@$SERVER_IP "source /opt/vulners-venv/bin/activate && python3 -c '
-import vulners, subprocess
+import vulners, subprocess, json
+
 v = vulners.VulnersApi(api_key=\"$VULNERS_API_KEY\")
+
 os_version = subprocess.getoutput(\"lsb_release -rs\")
-packages = subprocess.getoutput(\"dpkg-query -W -f=\\\"${Package} ${Version}\\\\n\\\"\").splitlines()
-result = v.software_audit(os=\"Debian\", version=os_version, packages=packages)
-print(result)
+
+raw_packages = subprocess.getoutput(\"dpkg-query -W -f=\\\"${Package} ${Version}\\\\n\\\"\").splitlines()
+packages_list = [{\"name\": pkg.split()[0], \"version\": pkg.split()[1]} for pkg in raw_packages if len(pkg.split()) == 2]
+
+result = v.software_audit(os=\"Debian\", version=os_version, packages=packages_list)
+print(json.dumps(result, indent=4))
 ' > /var/log/vulners_audit_$SERVER_IP.txt && deactivate"
+    
     ssh root@$SERVER_IP "cat /var/log/vulners_audit_$SERVER_IP.txt"
-    echo "✅ Audit enregistré sur le serveur distant"
+    echo "✅ Audit enregistré sur le serveur distant dans /var/log/vulners_audit_$SERVER_IP.txt"
     read -p "🔄 Appuyez sur Entrée pour revenir au menu..."
 }
+
+
 
 # ==========================================================
 # 📂 Affichage des audits précédents
