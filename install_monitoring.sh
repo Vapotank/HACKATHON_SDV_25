@@ -15,7 +15,7 @@ set -o pipefail
 #  - Utilisation de apt-get -y install (pas apt)
 #  - On installe explicitement ufw, mariadb-client, mariadb-server, etc. avant de les utiliser
 #
-# Auteur  : VAPOTANK / ChatGPT
+# Auteur  : VAPOTANK 
 # Date    : 2025-03-18
 # Usage   : sudo ./install_monitoring.sh  (ou bash install_monitoring.sh)
 ################################################################################

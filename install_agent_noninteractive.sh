@@ -1,4 +1,12 @@
 #!/bin/bash
+
+###############################################################################
+#
+# Auteur  : VAPOTANK
+# Date    : 2025-03-17
+# 
+###############################################################################
+
 set -euo pipefail
 
 # =============================================
@@ -40,15 +48,9 @@ echo "  2) Windows"
 read -rp "Votre choix (1/2) : " os_choice
 
 case "$os_choice" in
-  1)
-    OS_TYPE="debian"
-    ;;
-  2)
-    OS_TYPE="windows"
-    ;;
-  *)
-    error_exit "Option d'OS invalide."
-    ;;
+  1) OS_TYPE="debian" ;;
+  2) OS_TYPE="windows" ;;
+  *) error_exit "Option d'OS invalide." ;;
 esac
 
 echo ""
@@ -60,15 +62,9 @@ echo "  2) Agent Zabbix"
 read -rp "Votre choix (1/2) : " agent_choice
 
 case "$agent_choice" in
-  1)
-    AGENT_TYPE="filebeat"
-    ;;
-  2)
-    AGENT_TYPE="zabbix"
-    ;;
-  *)
-    error_exit "Option d'agent invalide."
-    ;;
+  1) AGENT_TYPE="filebeat" ;;
+  2) AGENT_TYPE="zabbix" ;;
+  *) error_exit "Option d'agent invalide." ;;
 esac
 
 echo ""
@@ -86,18 +82,31 @@ install_filebeat_debian() {
     ssh root@"$TARGET_IP" bash -s <<'EOF'
 set -euo pipefail
 echo "=== Installation de Filebeat ==="
+# Ajout de la clé GPG et du dépôt Elastic
 wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | apt-key add - || { echo "Échec de l'ajout de la clé GPG"; exit 1; }
 echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" > /etc/apt/sources.list.d/elastic-7.x.list
 apt update -y || { echo "Échec de la mise à jour"; exit 1; }
 apt install -y filebeat || { echo "Échec de l'installation de Filebeat"; exit 1; }
-# Configuration de Filebeat pour remonter vers le serveur central
-sed -i 's|#output.elasticsearch:|output.elasticsearch:|g' /etc/filebeat/filebeat.yml
-sed -i 's|#  hosts: \["localhost:9200"\]|  hosts: ["'"$SERVER_IP"':9200"]|g' /etc/filebeat/filebeat.yml
+# Création d'une configuration complète pour Filebeat :
+# Ajout d'un input minimal pour lire les logs système et configuration de l'output avec authentification
+cat <<CONFIG > /etc/filebeat/filebeat.yml
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/*.log
+
+output.elasticsearch:
+  hosts: ["${SERVER_IP}:9200"]
+  username: "elastic"
+  password: "FtGlIjDf9TBUxF5hjbZa"
+CONFIG
 systemctl enable filebeat
 systemctl restart filebeat
-echo "✅ Filebeat installé et démarré avec succès."
+echo "✅ Filebeat installé et configuré pour remonter vers ${SERVER_IP}:9200 avec authentification."
 EOF
-    if [ $? -eq 0 ]; then
+    exit_code=$?
+    if [ "$exit_code" -eq 0 ]; then
       echo -e "\e[32mInstallation de Filebeat réussie sur $TARGET_IP.\e[0m"
     else
       error_exit "Installation de Filebeat échouée sur $TARGET_IP"
@@ -107,36 +116,35 @@ EOF
 # Fonction pour installer l'agent Zabbix sur une machine Debian
 install_zabbix_debian() {
     echo -e "\e[32mInstallation de l'agent Zabbix sur Debian ($TARGET_IP)...\e[0m"
-    ssh root@"$TARGET_IP" bash -s <<'EOF'
+    ssh root@"$TARGET_IP" bash -s <<EOF
 set -euo pipefail
 echo "=== Installation de l'Agent Zabbix ==="
 wget -O /tmp/zabbix-release.deb https://repo.zabbix.com/zabbix/6.0/debian/pool/main/z/zabbix-release/zabbix-release_6.0-4+debian11_all.deb || { echo "Téléchargement du dépôt Zabbix échoué"; exit 1; }
 dpkg -i /tmp/zabbix-release.deb || { echo "Installation du dépôt Zabbix échouée"; exit 1; }
 apt update -y
 apt install -y zabbix-agent || { echo "Installation de l'agent Zabbix échouée"; exit 1; }
-# Configuration de l'agent pour remonter vers le serveur central
-ZABBIX_SERVER_IP="'"$SERVER_IP"'"
-AGENT_HOSTNAME="$(hostname)"
-sed -i "s|^Server=.*|Server=${ZABBIX_SERVER_IP}|" /etc/zabbix/zabbix_agentd.conf
-sed -i "s|^ServerActive=.*|ServerActive=${ZABBIX_SERVER_IP}|" /etc/zabbix/zabbix_agentd.conf
-sed -i "s|^Hostname=.*|Hostname=${AGENT_HOSTNAME}|" /etc/zabbix/zabbix_agentd.conf
+# Mise à jour de la configuration pour pointer vers le serveur central
+sed -i "s|^Server=.*|Server=${SERVER_IP}|" /etc/zabbix/zabbix_agentd.conf
+sed -i "s|^ServerActive=.*|ServerActive=${SERVER_IP}|" /etc/zabbix/zabbix_agentd.conf
+sed -i "s|^Hostname=.*|Hostname=\$(hostname)|" /etc/zabbix/zabbix_agentd.conf
 systemctl enable zabbix-agent
 systemctl restart zabbix-agent
-echo "✅ Agent Zabbix installé et configuré avec succès."
+echo "✅ Agent Zabbix installé et configuré pour remonter vers ${SERVER_IP}."
 EOF
-    if [ $? -eq 0 ]; then
+    exit_code=$?
+    if [ "$exit_code" -eq 0 ]; then
       echo -e "\e[32mInstallation de l'agent Zabbix réussie sur $TARGET_IP.\e[0m"
     else
       error_exit "Installation de l'agent Zabbix échouée sur $TARGET_IP"
     fi
 }
 
-# Instructions pour l'installation sur Windows (affichage des commandes à copier-coller)
+# Instructions pour l'installation sur Windows (affichage des commandes à copier/coller)
 install_filebeat_windows_instructions() {
     echo -e "\e[33mPour installer Filebeat sur Windows, ouvrez une session PowerShell en mode Administrateur et exécutez les commandes suivantes :\e[0m"
     cat << EOF
 Invoke-WebRequest -Uri "https://votre-domaine/Install_Filebeat.ps1" -OutFile "C:\Temp\Install_Filebeat.ps1"
-# Ce script est préconfiguré pour remonter vers le serveur $SERVER_IP:9200
+# Ce script est préconfiguré pour remonter vers le serveur ${SERVER_IP}:9200
 powershell -ExecutionPolicy Bypass -File C:\Temp\Install_Filebeat.ps1
 EOF
 }
@@ -145,7 +153,7 @@ install_zabbix_windows_instructions() {
     echo -e "\e[33mPour installer l'agent Zabbix sur Windows, ouvrez une session PowerShell en mode Administrateur et exécutez les commandes suivantes :\e[0m"
     cat << EOF
 Invoke-WebRequest -Uri "https://votre-domaine/Install_ZabbixAgent.ps1" -OutFile "C:\Temp\Install_ZabbixAgent.ps1"
-# Ce script est préconfiguré pour remonter vers le serveur $SERVER_IP
+# Ce script est préconfiguré pour remonter vers le serveur ${SERVER_IP}
 powershell -ExecutionPolicy Bypass -File C:\Temp\Install_ZabbixAgent.ps1
 EOF
 }
@@ -172,4 +180,4 @@ else
 fi
 
 echo ""
-echo -e "\e[32mInstallation et configuration terminées. L'agent remontera automatiquement vers le serveur $SERVER_IP.\e[0m"
+echo -e "\e[32mInstallation et configuration terminées. L'agent remontera automatiquement vers le serveur ${SERVER_IP}.\e[0m"
