@@ -224,8 +224,7 @@ Ce projet propose une **solution complète** pour déployer et gérer un environ
 ## 📌 Auteurs & Contributions
 - **Créateur du Projet :**  
   *VAPOTANK – Projet Hackathon SDV 2025*  
-- **Support & Issues :**  
-  Ouvrir une issue ou contacter l’équipe DevOps via le dépôt du projet.
+  
 
 ---
 
